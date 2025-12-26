@@ -1,6 +1,6 @@
 # Wherite - 文章查询系统
 
-**版本：ver 0.03 图形化实验版**
+**版本：ver 0.04 模块化拆分版**
 
 ## 项目简介
 
@@ -15,6 +15,7 @@ Wherite是一个基于SQLite数据库的文章查询系统，支持根据文章I
 - 保存修改到数据库
 - 输入验证和错误处理
 - 响应式布局设计
+- 模块化代码架构，便于维护和扩展
 
 ## 技术栈
 
@@ -39,18 +40,6 @@ Wherite是一个基于SQLite数据库的文章查询系统，支持根据文章I
 
 - Go 1.25.4 或更高版本
 - SQLite3 数据库文件 `wherite.sqlite3`
-
-### 安装依赖
-
-```bash
-go mod download
-```
-
-### 运行程序
-
-```bash
-go run main.go
-```
 
 ### 编译程序
 
@@ -97,11 +86,47 @@ go build -o wherite
 
 ```
 wherite/
-├── main.go           # 主程序文件
-├── go.mod            # Go模块依赖管理
-├── go.sum            # 依赖校验文件
-├── wherite.sqlite3   # SQLite数据库文件
-└── README.md         # 项目说明文档
+├── wherite_main.go       # 主程序入口
+├── wherite_gui.go        # 图形界面模块
+├── wherite_database.go   # 数据库操作模块
+├── go.mod                # Go模块依赖管理
+├── go.sum                # 依赖校验文件
+├── wherite.sqlite3       # SQLite数据库文件
+└── README.md             # 项目说明文档
+```
+
+## 模块说明
+
+### 1. 创建的模块文件
+
+**wherite_database.go** - 数据库操作模块
+- 包含所有数据库连接、查询、更新、删除等操作
+- 定义了 Article 结构体和 9 个操作数据库函数
+- 使用纯 Go SQLite 驱动避免 CGO 依赖
+
+**wherite_gui.go** - 图形界面模块
+- 包含所有 GUI 渲染和交互事件处理代码
+- 定义了 UI 结构体和界面布局方法
+- 实现了查询、保存等用户交互功能
+
+**wherite_main.go** - 主程序入口
+- 作为程序启动点，负责模块协调
+- 初始化数据库连接和图形界面
+- 处理程序启动和退出流程
+
+### 2. 模块间通信架构
+```
+wherite_main.go (主入口)
+    ├── 调用 ConnectDB()、InitializeDatabase() (数据库模块)
+    ├── 调用 NewUI() (GUI模块)
+    └── 启动 app.Main() 事件循环
+
+wherite_gui.go (GUI模块)
+    ├── 调用 GetArticleByID() (数据库模块)
+    └── 调用 UpdateArticleByID() (数据库模块)
+
+wherite_database.go (数据库模块)
+    └── 独立的数据访问层，无外部依赖
 ```
 
 ## 技术说明
@@ -125,6 +150,15 @@ wherite/
 - **编译简单**：无需配置CGO环境
 
 ## 版本历史
+
+### ver 0.04 模块化拆分版
+
+- 实现代码模块化拆分，分离关注点
+- 创建 `wherite_main.go` 作为主入口程序
+- 创建 `wherite_gui.go` 作为图形界面模块
+- 创建 `wherite_database.go` 作为数据库操作模块
+- 建立清晰的模块间通信架构
+- 保持功能完整性，提高代码可维护性
 
 ### ver 0.03 图形化实验版
 
