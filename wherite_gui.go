@@ -19,11 +19,13 @@ type UI struct {
 	theme        *material.Theme
 	idInput      widget.Editor
 	queryBtn     widget.Clickable
+	createBtn    widget.Clickable
 	titleInput   widget.Editor
 	contentInput widget.Editor
 	saveBtn      widget.Clickable
 	db           *sql.DB
 	errorMsg     string
+	isCreating   bool
 }
 
 // NewUI 创建一个新的UI实例
@@ -72,6 +74,10 @@ func (ui *UI) Layout(gtx layout.Context, w *app.Window) {
 		ui.queryArticle()
 	}
 
+	if ui.createBtn.Clicked(gtx) {
+		ui.createArticle()
+	}
+
 	if ui.saveBtn.Clicked(gtx) {
 		ui.saveArticle()
 	}
@@ -96,6 +102,13 @@ func (ui *UI) Layout(gtx layout.Context, w *app.Window) {
 							btn := material.Button(ui.theme, &ui.queryBtn, "查询")
 							btn.TextSize = unit.Sp(16)
 							return btn.Layout(gtx)
+						})
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return layout.UniformInset(unit.Dp(10)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							createBtn := material.Button(ui.theme, &ui.createBtn, "新建")
+							createBtn.TextSize = unit.Sp(16)
+							return createBtn.Layout(gtx)
 						})
 					}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -187,20 +200,17 @@ func (ui *UI) queryArticle() {
 	ui.errorMsg = ""
 }
 
+// createArticle 进入新建模式，清空输入框
+func (ui *UI) createArticle() {
+	ui.idInput.SetText("")
+	ui.titleInput.SetText("")
+	ui.contentInput.SetText("")
+	ui.errorMsg = ""
+	ui.isCreating = true
+}
+
 // saveArticle 保存文章
 func (ui *UI) saveArticle() {
-	idStr := ui.idInput.Text()
-	if idStr == "" {
-		ui.errorMsg = "请先输入文章ID并查询"
-		return
-	}
-
-	id, err := strconv.Atoi(idStr)
-	if err != nil {
-		ui.errorMsg = "无效的ID格式，请输入数字"
-		return
-	}
-
 	title := ui.titleInput.Text()
 	content := ui.contentInput.Text()
 
@@ -214,11 +224,35 @@ func (ui *UI) saveArticle() {
 		return
 	}
 
-	err = UpdateArticleByID(ui.db, id, title, content)
-	if err != nil {
-		ui.errorMsg = fmt.Sprintf("保存失败: %v", err)
-		return
-	}
+	if ui.isCreating {
+		// 新建模式：创建新文章
+		id, err := CreateArticle(ui.db, title, content)
+		if err != nil {
+			ui.errorMsg = fmt.Sprintf("创建失败: %v", err)
+			return
+		}
+		ui.idInput.SetText(strconv.FormatInt(id, 10))
+		ui.isCreating = false
+		ui.errorMsg = "创建成功！"
+	} else {
+		// 编辑模式：更新现有文章
+		idStr := ui.idInput.Text()
+		if idStr == "" {
+			ui.errorMsg = "请先输入文章ID并查询"
+			return
+		}
 
-	ui.errorMsg = "保存成功！"
+		id, err := strconv.Atoi(idStr)
+		if err != nil {
+			ui.errorMsg = "无效的ID格式，请输入数字"
+			return
+		}
+
+		err = UpdateArticleByID(ui.db, id, title, content)
+		if err != nil {
+			ui.errorMsg = fmt.Sprintf("保存失败: %v", err)
+			return
+		}
+		ui.errorMsg = "保存成功！"
+	}
 }
