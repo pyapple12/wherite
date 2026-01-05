@@ -25,6 +25,7 @@ type UI struct {
 	saveBtn      widget.Clickable
 	db           *sql.DB
 	errorMsg     string
+	successMsg   string
 	isCreating   bool
 }
 
@@ -132,6 +133,17 @@ func (ui *UI) Layout(gtx layout.Context, w *app.Window) {
 			}
 			return layout.Dimensions{}
 		}),
+		// 成功消息/时间信息显示
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if ui.successMsg != "" {
+				return layout.UniformInset(unit.Dp(10)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					lbl := material.Label(ui.theme, unit.Sp(14), ui.successMsg)
+					lbl.Color = ui.theme.Palette.ContrastFg
+					return lbl.Layout(gtx)
+				})
+			}
+			return layout.Dimensions{}
+		}),
 		// 标题输入框
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.UniformInset(unit.Dp(20)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -198,6 +210,7 @@ func (ui *UI) queryArticle() {
 	ui.titleInput.SetText(article.Title)
 	ui.contentInput.SetText(article.Content)
 	ui.errorMsg = ""
+	ui.successMsg = fmt.Sprintf("创建时间: %s | 修改时间: %s", article.CreatedAt, article.UpdatedAt)
 }
 
 // createArticle 进入新建模式，清空输入框
@@ -206,6 +219,7 @@ func (ui *UI) createArticle() {
 	ui.titleInput.SetText("")
 	ui.contentInput.SetText("")
 	ui.errorMsg = ""
+	ui.successMsg = ""
 	ui.isCreating = true
 }
 
@@ -233,7 +247,8 @@ func (ui *UI) saveArticle() {
 		}
 		ui.idInput.SetText(strconv.FormatInt(id, 10))
 		ui.isCreating = false
-		ui.errorMsg = "创建成功！"
+		ui.errorMsg = ""
+		ui.successMsg = "创建成功！"
 	} else {
 		// 编辑模式：更新现有文章
 		idStr := ui.idInput.Text()
@@ -253,6 +268,7 @@ func (ui *UI) saveArticle() {
 			ui.errorMsg = fmt.Sprintf("保存失败: %v", err)
 			return
 		}
-		ui.errorMsg = "保存成功！"
+		ui.errorMsg = ""
+		ui.successMsg = "保存成功！"
 	}
 }

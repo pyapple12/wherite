@@ -10,9 +10,11 @@ import (
 
 // Article 表示数据库中的文章记录
 type Article struct {
-	ID      int
-	Title   string
-	Content string
+	ID        int
+	Title     string
+	Content   string
+	CreatedAt string
+	UpdatedAt string
 }
 
 // ConnectDB 连接SQLite数据库并返回数据库连接
@@ -40,8 +42,8 @@ func CloseDB(db *sql.DB) {
 // GetArticleByID 根据ID查询文章
 func GetArticleByID(db *sql.DB, id int) (*Article, error) {
 	var article Article
-	query := "SELECT id, title, content FROM articles WHERE id = ?"
-	err := db.QueryRow(query, id).Scan(&article.ID, &article.Title, &article.Content)
+	query := "SELECT id, title, content, created_at, updated_at FROM articles WHERE id = ?"
+	err := db.QueryRow(query, id).Scan(&article.ID, &article.Title, &article.Content, &article.CreatedAt, &article.UpdatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("未找到ID为%d的文章", id)
@@ -109,7 +111,7 @@ func DeleteArticleByID(db *sql.DB, id int) error {
 
 // GetAllArticles 获取所有文章
 func GetAllArticles(db *sql.DB) ([]Article, error) {
-	query := "SELECT id, title, content FROM articles ORDER BY id"
+	query := "SELECT id, title, content, created_at, updated_at FROM articles ORDER BY id"
 	rows, err := db.Query(query)
 	if err != nil {
 		return nil, fmt.Errorf("查询失败: %w", err)
@@ -119,7 +121,7 @@ func GetAllArticles(db *sql.DB) ([]Article, error) {
 	var articles []Article
 	for rows.Next() {
 		var article Article
-		if err := rows.Scan(&article.ID, &article.Title, &article.Content); err != nil {
+		if err := rows.Scan(&article.ID, &article.Title, &article.Content, &article.CreatedAt, &article.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("读取数据失败: %w", err)
 		}
 		articles = append(articles, article)
@@ -134,17 +136,58 @@ func GetAllArticles(db *sql.DB) ([]Article, error) {
 
 // InitializeDatabase 初始化数据库表
 func InitializeDatabase(db *sql.DB) error {
-	query := `
+	// 创建表（如果不存在）
+	createTable := `
 	CREATE TABLE IF NOT EXISTS articles (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		title TEXT NOT NULL,
-		content TEXT NOT NULL
+		content TEXT NOT NULL,
+		created_at TEXT DEFAULT (datetime('now', 'localtime')),
+		updated_at TEXT DEFAULT (datetime('now', 'localtime'))
 	)
 	`
-	_, err := db.Exec(query)
+	_, err := db.Exec(createTable)
 	if err != nil {
 		return fmt.Errorf("创建表失败: %w", err)
 	}
+
+	// 添加时间戳列（如果表中不存在）
+	alterTable := `
+	ALTER TABLE articles ADD COLUMN created_at TEXT DEFAULT (datetime('now', 'localtime'))
+	`
+	db.Exec(alterTable)
+
+	alterTable = `
+	ALTER TABLE articles ADD COLUMN updated_at TEXT DEFAULT (datetime('now', 'localtime'))
+	`
+	db.Exec(alterTable)
+
+	// 创建 INSERT 触发器 - 自动设置创建时间
+	createInsertTrigger := `
+	CREATE TRIGGER IF NOT EXISTS set_created_at
+	AFTER INSERT ON articles
+	BEGIN
+		UPDATE articles SET created_at = datetime('now', 'localtime'), updated_at = datetime('now', 'localtime') WHERE id = NEW.id;
+	END
+	`
+	_, err = db.Exec(createInsertTrigger)
+	if err != nil {
+		return fmt.Errorf("创建INSERT触发器失败: %w", err)
+	}
+
+	// 创建 UPDATE 触发器 - 自动更新修改时间
+	createUpdateTrigger := `
+	CREATE TRIGGER IF NOT EXISTS set_updated_at
+	AFTER UPDATE ON articles
+	BEGIN
+		UPDATE articles SET updated_at = datetime('now', 'localtime') WHERE id = NEW.id;
+	END
+	`
+	_, err = db.Exec(createUpdateTrigger)
+	if err != nil {
+		return fmt.Errorf("创建UPDATE触发器失败: %w", err)
+	}
+
 	return nil
 }
 

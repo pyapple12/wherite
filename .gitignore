@@ -90,3 +90,6 @@ ENV/
 
 # Trae AI assistant
 .trae/
+
+# Go executable
+wherite
