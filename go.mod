@@ -1,9 +1,10 @@
 module wherite
 
-go 1.25.4
+go 1.25.5
 
 require (
 	gioui.org v0.9.0
+	github.com/yuin/goldmark v1.7.15
 	modernc.org/sqlite v1.26.0
 )
 

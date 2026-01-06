@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__ide__getDiagnostics",
+      "Bash(powershell:*)",
+      "Bash(go run:*)",
+      "Bash(cat:*)",
+      "Bash(go build)"
+    ]
+  }
+}
