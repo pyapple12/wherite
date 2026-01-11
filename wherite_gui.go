@@ -50,10 +50,13 @@ type UI struct {
 	isSearching       bool
 	articleList       widget.List
 	previewList       widget.List
-	hasUnsavedChanges bool   // 是否有未保存的更改
-	originalTitle     string // 文章原始标题（用于比较）
-	originalContent   string // 文章原始内容（用于比较）
-	timeInfo          string // 时间信息（创建时间和修改时间）
+	hasUnsavedChanges bool             // 是否有未保存的更改
+	originalTitle     string           // 文章原始标题（用于比较）
+	originalContent   string           // 文章原始内容（用于比较）
+	timeInfo          string           // 时间信息（创建时间和修改时间）
+	showDeleteConfirm bool             // 是否显示删除确认对话框
+	confirmDeleteBtn  widget.Clickable // 确认删除按钮
+	cancelDeleteBtn   widget.Clickable // 取消删除按钮
 }
 
 // NewUI 创建一个新的UI实例
@@ -119,6 +122,14 @@ func (ui *UI) Layout(gtx layout.Context, w *app.Window) {
 		ui.deleteArticle()
 	}
 
+	if ui.confirmDeleteBtn.Clicked(gtx) {
+		ui.confirmDelete()
+	}
+
+	if ui.cancelDeleteBtn.Clicked(gtx) {
+		ui.cancelDelete()
+	}
+
 	if ui.saveBtn.Clicked(gtx) {
 		ui.saveArticle()
 	}
@@ -146,12 +157,114 @@ func (ui *UI) Layout(gtx layout.Context, w *app.Window) {
 		}
 	}
 
-	layout.Flex{
+	// 主界面布局
+	mainContent := layout.Flex{
 		Axis: layout.Horizontal,
 	}.Layout(gtx,
 		layout.Rigid(ui.sidebarLayout()),
 		layout.Flexed(1, ui.editorLayout()),
 	)
+
+	// 渲染删除确认对话框（如果需要显示）
+	if ui.showDeleteConfirm {
+		ui.deleteConfirmDialog(gtx, mainContent)
+	}
+}
+
+// deleteConfirmDialog 渲染删除确认对话框
+func (ui *UI) deleteConfirmDialog(gtx layout.Context, mainContent layout.Dimensions) layout.Dimensions {
+	// 半透明背景遮罩
+	bgColor := color.NRGBA{R: 0, G: 0, B: 0, A: 128}
+	stack := clip.Rect{
+		Min: image.Point{},
+		Max: gtx.Constraints.Max,
+	}.Push(gtx.Ops)
+	paint.FillShape(gtx.Ops, bgColor, clip.Rect{
+		Min: image.Point{},
+		Max: gtx.Constraints.Max,
+	}.Op())
+	stack.Pop()
+
+	// 对话框内容
+	dialogWidth := gtx.Dp(400)
+	dialogHeight := gtx.Dp(200)
+	x := (gtx.Constraints.Max.X - dialogWidth) / 2
+	y := (gtx.Constraints.Max.Y - dialogHeight) / 2
+
+	// 对话框背景
+	dialogBgColor := ui.theme.Palette.Bg
+	stack = clip.Rect{
+		Min: image.Point{X: x, Y: y},
+		Max: image.Point{X: x + dialogWidth, Y: y + dialogHeight},
+	}.Push(gtx.Ops)
+	paint.FillShape(gtx.Ops, dialogBgColor, clip.Rect{
+		Min: image.Point{X: x, Y: y},
+		Max: image.Point{X: x + dialogWidth, Y: y + dialogHeight},
+	}.Op())
+
+	// 对话框边框
+	borderColor := ui.theme.Palette.ContrastBg
+	borderWidth := 2
+	borderRect := clip.Rect{
+		Min: image.Point{X: x, Y: y},
+		Max: image.Point{X: x + dialogWidth, Y: y + dialogHeight},
+	}
+	paint.FillShape(gtx.Ops, borderColor, borderRect.Op())
+
+	// 内部填充的对话框内容区域
+	contentRect := clip.Rect{
+		Min: image.Point{X: x + borderWidth, Y: y + borderWidth},
+		Max: image.Point{X: x + dialogWidth - borderWidth, Y: y + dialogHeight - borderWidth},
+	}
+	paint.FillShape(gtx.Ops, dialogBgColor, contentRect.Op())
+	stack.Pop()
+
+	// 在对话框区域内布局内容
+	dialogGtx := gtx
+	dialogGtx.Constraints.Min = image.Point{X: dialogWidth - borderWidth*2, Y: dialogHeight - borderWidth*2}
+	dialogGtx.Constraints.Max = image.Point{X: dialogWidth - borderWidth*2, Y: dialogHeight - borderWidth*2}
+	op.Offset(image.Point{X: x + borderWidth, Y: y + borderWidth}).Add(dialogGtx.Ops)
+
+	layout.UniformInset(unit.Dp(20)).Layout(dialogGtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{
+			Axis: layout.Vertical,
+		}.Layout(gtx,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				lbl := material.Label(ui.theme, unit.Sp(18), "确认删除")
+				lbl.Font.Weight = font.Bold
+				lbl.Color = ui.theme.Palette.ContrastBg
+				return lbl.Layout(gtx)
+			}),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(15)}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				lbl := material.Label(ui.theme, unit.Sp(14), "确定要删除当前文章吗？此操作无法撤销。")
+				return lbl.Layout(gtx)
+			}),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(20)}.Layout),
+			layout.Flexed(1, layout.Spacer{}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{
+					Axis:      layout.Horizontal,
+					Alignment: layout.Middle,
+				}.Layout(gtx,
+					layout.Flexed(1, layout.Spacer{}.Layout),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						btn := material.Button(ui.theme, &ui.confirmDeleteBtn, "确认删除")
+						btn.Color = color.NRGBA{R: 255, G: 0, B: 0, A: 255} // 红色按钮
+						return btn.Layout(gtx)
+					}),
+					layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						btn := material.Button(ui.theme, &ui.cancelDeleteBtn, "取消")
+						return btn.Layout(gtx)
+					}),
+				)
+			}),
+		)
+	})
+
+	// 确保返回主界面的尺寸
+	return mainContent
 }
 
 // queryArticle 查询文章
@@ -291,8 +404,18 @@ func (ui *UI) selectArticle(id int) {
 	ui.successMsg = "" // 清空成功消息
 }
 
-// deleteArticle 删除当前选中的文章
+// deleteArticle 显示删除确认对话框
 func (ui *UI) deleteArticle() {
+	if ui.selectedArticleID == -1 {
+		ui.errorMsg = "请先选择要删除的文章"
+		return
+	}
+
+	ui.showDeleteConfirm = true
+}
+
+// confirmDelete 确认删除文章
+func (ui *UI) confirmDelete() {
 	if ui.selectedArticleID == -1 {
 		ui.errorMsg = "请先选择要删除的文章"
 		return
@@ -301,6 +424,7 @@ func (ui *UI) deleteArticle() {
 	err := DeleteArticleByID(ui.db, ui.selectedArticleID)
 	if err != nil {
 		ui.errorMsg = fmt.Sprintf("删除失败: %v", err)
+		ui.showDeleteConfirm = false
 		return
 	}
 
@@ -311,6 +435,12 @@ func (ui *UI) deleteArticle() {
 	ui.contentInput.SetText("")
 	ui.idInput.SetText("")
 	ui.loadArticles()
+	ui.showDeleteConfirm = false
+}
+
+// cancelDelete 取消删除操作
+func (ui *UI) cancelDelete() {
+	ui.showDeleteConfirm = false
 }
 
 // loadArticles 从数据库加载所有文章
