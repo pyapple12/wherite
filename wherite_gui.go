@@ -20,50 +20,37 @@ import (
 
 // UI 结构体管理图形界面状态和组件
 type UI struct {
-	theme              *material.Theme
-	idInput            widget.Editor
-	queryBtn           widget.Clickable
-	createBtn          widget.Clickable
-	titleInput         widget.Editor
-	contentInput       widget.Editor
-	saveBtn            widget.Clickable
-	deleteBtn          widget.Clickable
-	db                 *sql.DB
-	errorMsg           string
-	successMsg         string
-	isCreating         bool
-	articles           []Article
-	selectedArticleID  int
-	sidebarCollapsed   bool
-	toggleSidebarBtn   widget.Clickable
-	newArticleBtn      widget.Clickable
-	previewMode        bool
-	togglePreviewBtn   widget.Clickable
-	renderedHTML       string
-	articleClickables  map[int]*widget.Clickable
-	renameBtn          widget.Clickable
-	showRenameDialog   bool
-	renameTitleInput   widget.Editor
-	confirmRenameBtn   widget.Clickable
-	cancelRenameBtn    widget.Clickable
-	categories         []Category
-	tags               []Tag
-	selectedCategory   int
-	articleTags        []int
-	showCategoryDialog bool
-	showTagDialog      bool
-	newCategoryInput   widget.Editor
-	newTagInput        widget.Editor
-	addCategoryBtn     widget.Clickable
-	addTagBtn          widget.Clickable
-	closeCategoryBtn   widget.Clickable
-	closeTagBtn        widget.Clickable
-	manageCategoryBtn  widget.Clickable
-	manageTagBtn       widget.Clickable
-	searchInput        widget.Editor
-	searchBtn          widget.Clickable
-	clearSearchBtn     widget.Clickable
-	isSearching        bool
+	theme             *material.Theme
+	idInput           widget.Editor
+	queryBtn          widget.Clickable
+	createBtn         widget.Clickable
+	titleInput        widget.Editor
+	contentInput      widget.Editor
+	saveBtn           widget.Clickable
+	deleteBtn         widget.Clickable
+	db                *sql.DB
+	errorMsg          string
+	successMsg        string
+	isCreating        bool
+	articles          []Article
+	selectedArticleID int
+	sidebarCollapsed  bool
+	toggleSidebarBtn  widget.Clickable
+	newArticleBtn     widget.Clickable
+	previewMode       bool
+	togglePreviewBtn  widget.Clickable
+	renderedHTML      string
+	articleClickables map[int]*widget.Clickable
+	renameBtn         widget.Clickable
+	showRenameDialog  bool
+	renameTitleInput  widget.Editor
+	confirmRenameBtn  widget.Clickable
+	cancelRenameBtn   widget.Clickable
+	searchInput       widget.Editor
+	searchBtn         widget.Clickable
+	clearSearchBtn    widget.Clickable
+	isSearching       bool
+	articleList       widget.List
 }
 
 // NewUI 创建一个新的UI实例
@@ -73,20 +60,13 @@ func NewUI(db *sql.DB) *UI {
 		db:                db,
 		selectedArticleID: -1,
 		articleClickables: make(map[int]*widget.Clickable),
-		selectedCategory:  -1,
-		articleTags:       make([]int, 0),
 	}
 	ui.idInput.SingleLine = true
 	ui.idInput.Submit = true
 	ui.titleInput.SingleLine = true
-	ui.contentInput.Submit = true
 	ui.renameTitleInput.SingleLine = true
-	ui.newCategoryInput.SingleLine = true
-	ui.newTagInput.SingleLine = true
 	ui.searchInput.SingleLine = true
 	ui.loadArticles()
-	ui.loadCategories()
-	ui.loadTags()
 	return ui
 }
 
@@ -152,40 +132,20 @@ func (ui *UI) Layout(gtx layout.Context, w *app.Window) {
 		ui.renameTitleInput.SetText("")
 	}
 
-	if ui.addCategoryBtn.Clicked(gtx) {
-		ui.addCategory()
-	}
-
-	if ui.addTagBtn.Clicked(gtx) {
-		ui.addTag()
-	}
-
-	if ui.closeCategoryBtn.Clicked(gtx) {
-		ui.showCategoryDialog = false
-		ui.newCategoryInput.SetText("")
-	}
-
-	if ui.closeTagBtn.Clicked(gtx) {
-		ui.showTagDialog = false
-		ui.newTagInput.SetText("")
-	}
-
-	if ui.manageCategoryBtn.Clicked(gtx) {
-		ui.showCategoryDialog = true
-		ui.loadCategories()
-	}
-
-	if ui.manageTagBtn.Clicked(gtx) {
-		ui.showTagDialog = true
-		ui.loadTags()
-	}
-
 	if ui.searchBtn.Clicked(gtx) {
 		ui.searchArticles()
 	}
 
 	if ui.clearSearchBtn.Clicked(gtx) {
 		ui.clearSearch()
+	}
+
+	// 检查文章列表项的点击
+	for _, article := range ui.articles {
+		click := ui.articleClickables[article.ID]
+		if click.Clicked(gtx) {
+			ui.selectArticle(article.ID)
+		}
 	}
 
 	layout.Flex{
@@ -197,14 +157,6 @@ func (ui *UI) Layout(gtx layout.Context, w *app.Window) {
 
 	if ui.showRenameDialog {
 		ui.renameDialogLayout(gtx)
-	}
-
-	if ui.showCategoryDialog {
-		ui.categoryDialogLayout(gtx)
-	}
-
-	if ui.showTagDialog {
-		ui.tagDialogLayout(gtx)
 	}
 }
 
@@ -320,7 +272,6 @@ func (ui *UI) selectArticle(id int) {
 	ui.isCreating = false
 	ui.errorMsg = ""
 	ui.successMsg = fmt.Sprintf("创建时间: %s | 修改时间: %s", article.CreatedAt, article.UpdatedAt)
-	ui.loadArticleCategoryAndTags()
 }
 
 // deleteArticle 删除当前选中的文章
@@ -353,6 +304,11 @@ func (ui *UI) loadArticles() {
 		return
 	}
 	ui.articles = articles
+	// 清空并重建 clickable map，确保每个文章都有新的 clickable
+	ui.articleClickables = make(map[int]*widget.Clickable)
+	for _, article := range articles {
+		ui.articleClickables[article.ID] = &widget.Clickable{}
+	}
 }
 
 // confirmRename 确认重命名
@@ -375,98 +331,6 @@ func (ui *UI) confirmRename() {
 	ui.errorMsg = ""
 	ui.successMsg = "重命名成功！"
 	ui.loadArticles()
-}
-
-// loadCategories 加载所有分类
-func (ui *UI) loadCategories() {
-	categories, err := GetAllCategories(ui.db)
-	if err != nil {
-		ui.errorMsg = fmt.Sprintf("加载分类失败: %v", err)
-		return
-	}
-	ui.categories = categories
-}
-
-// loadTags 加载所有标签
-func (ui *UI) loadTags() {
-	tags, err := GetAllTags(ui.db)
-	if err != nil {
-		ui.errorMsg = fmt.Sprintf("加载标签失败: %v", err)
-		return
-	}
-	ui.tags = tags
-}
-
-// addCategory 添加新分类
-func (ui *UI) addCategory() {
-	name := ui.newCategoryInput.Text()
-	if name == "" {
-		ui.errorMsg = "分类名称不能为空"
-		return
-	}
-
-	_, err := CreateCategory(ui.db, name)
-	if err != nil {
-		ui.errorMsg = fmt.Sprintf("添加分类失败: %v", err)
-		return
-	}
-
-	ui.newCategoryInput.SetText("")
-	ui.errorMsg = ""
-	ui.successMsg = "分类添加成功！"
-	ui.loadCategories()
-}
-
-// addTag 添加新标签
-func (ui *UI) addTag() {
-	name := ui.newTagInput.Text()
-	if name == "" {
-		ui.errorMsg = "标签名称不能为空"
-		return
-	}
-
-	_, err := CreateTag(ui.db, name)
-	if err != nil {
-		ui.errorMsg = fmt.Sprintf("添加标签失败: %v", err)
-		return
-	}
-
-	ui.newTagInput.SetText("")
-	ui.errorMsg = ""
-	ui.successMsg = "标签添加成功！"
-	ui.loadTags()
-}
-
-// loadArticleCategoryAndTags 加载文章的分类和标签
-func (ui *UI) loadArticleCategoryAndTags() {
-	if ui.selectedArticleID == -1 {
-		ui.selectedCategory = -1
-		ui.articleTags = make([]int, 0)
-		return
-	}
-
-	category, err := GetArticleCategory(ui.db, ui.selectedArticleID)
-	if err != nil {
-		ui.errorMsg = fmt.Sprintf("加载分类失败: %v", err)
-		return
-	}
-
-	if category != nil {
-		ui.selectedCategory = category.ID
-	} else {
-		ui.selectedCategory = -1
-	}
-
-	tags, err := GetArticleTags(ui.db, ui.selectedArticleID)
-	if err != nil {
-		ui.errorMsg = fmt.Sprintf("加载标签失败: %v", err)
-		return
-	}
-
-	ui.articleTags = make([]int, 0, len(tags))
-	for _, tag := range tags {
-		ui.articleTags = append(ui.articleTags, tag.ID)
-	}
 }
 
 // searchArticles 搜索文章
@@ -501,7 +365,10 @@ func (ui *UI) clearSearch() {
 // sidebarLayout 渲染侧边栏布局
 func (ui *UI) sidebarLayout() layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
+		gtx.Constraints.Max.X = 350 // 设置侧边栏宽度
 		if ui.sidebarCollapsed {
+			// 折叠状态：显示一个小按钮切换回展开状态
+			gtx.Constraints.Max.X = 60
 			return layout.UniformInset(unit.Dp(5)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				return layout.Flex{
 					Axis: layout.Vertical,
@@ -594,95 +461,69 @@ func (ui *UI) articleListLayoutContent(gtx layout.Context) layout.Dimensions {
 		return lbl.Layout(gtx)
 	}
 
-	children := make([]layout.FlexChild, 0, len(ui.articles))
-	for _, article := range ui.articles {
-		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return ui.articleItemLayout(gtx, article)
-		}))
-	}
+	// 配置列表
+	ui.articleList.Axis = layout.Vertical
 
-	return layout.Flex{
-		Axis: layout.Vertical,
-	}.Layout(gtx, children...)
+	return ui.articleList.Layout(gtx, len(ui.articles), func(gtx layout.Context, index int) layout.Dimensions {
+		article := ui.articles[index]
+		return ui.articleItemLayout(gtx, article)
+	})
 }
 
 // articleItemLayout 渲染单个文章列表项
 func (ui *UI) articleItemLayout(gtx layout.Context, article Article) layout.Dimensions {
-	click, ok := ui.articleClickables[article.ID]
-	if !ok {
-		click = &widget.Clickable{}
-		ui.articleClickables[article.ID] = click
-	}
-
-	if click.Clicked(gtx) {
-		ui.selectArticle(article.ID)
-	}
-
+	click := ui.articleClickables[article.ID]
 	isSelected := ui.selectedArticleID == article.ID
-	bgColor := ui.theme.Palette.ContrastBg
+
+	// 默认白色背景，选中时为蓝色
+	bgColor := color.NRGBA{R: 255, G: 255, B: 255, A: 255}
 	if isSelected {
-		bgColor = ui.theme.Palette.ContrastFg
+		bgColor = ui.theme.Palette.ContrastBg
 	}
 
-	summary := getArticleSummary(article.Content, 50)
+	// 只取日期部分，去掉具体时间
+	dateStr := article.CreatedAt
+	if len(dateStr) >= 10 {
+		dateStr = dateStr[:10]
+	}
 
-	return layout.UniformInset(unit.Dp(5)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return layout.Stack{}.Layout(gtx,
-			layout.Expanded(func(gtx layout.Context) layout.Dimensions {
-				stack := clip.Rect{
-					Min: image.Point{},
-					Max: gtx.Constraints.Max,
-				}.Push(gtx.Ops)
-				defer stack.Pop()
-				paint.FillShape(gtx.Ops, bgColor, clip.Rect{
-					Min: image.Point{},
-					Max: gtx.Constraints.Max,
-				}.Op())
-				return layout.Dimensions{Size: gtx.Constraints.Max}
-			}),
-			layout.Stacked(func(gtx layout.Context) layout.Dimensions {
-				return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					return layout.Flex{
-						Axis: layout.Vertical,
-					}.Layout(gtx,
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							lbl := material.Label(ui.theme, unit.Sp(14), article.Title)
-							if isSelected {
-								lbl.Color = ui.theme.Palette.ContrastBg
-							}
-							lbl.Font.Weight = font.Medium
-							return lbl.Layout(gtx)
-						}),
-						layout.Rigid(layout.Spacer{Height: unit.Dp(2)}.Layout),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							lbl := material.Label(ui.theme, unit.Sp(12), article.CreatedAt)
-							if isSelected {
-								lbl.Color = ui.theme.Palette.ContrastBg
-							}
-							return lbl.Layout(gtx)
-						}),
-						layout.Rigid(layout.Spacer{Height: unit.Dp(2)}.Layout),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							lbl := material.Label(ui.theme, unit.Sp(11), summary)
-							if isSelected {
-								lbl.Color = ui.theme.Palette.ContrastBg
-							}
-							lbl.MaxLines = 2
-							return lbl.Layout(gtx)
-						}),
-					)
-				})
-			}),
-		)
+	// 使用 clickable 包装内容
+	return click.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		// 背景
+		stack := clip.Rect{
+			Min: image.Point{},
+			Max: gtx.Constraints.Max,
+		}.Push(gtx.Ops)
+		defer stack.Pop()
+		paint.FillShape(gtx.Ops, bgColor, clip.Rect{
+			Min: image.Point{},
+			Max: gtx.Constraints.Max,
+		}.Op())
+
+		// 内容
+		return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{
+				Axis: layout.Vertical,
+			}.Layout(gtx,
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					lbl := material.Label(ui.theme, unit.Sp(14), article.Title)
+					if isSelected {
+						lbl.Color = ui.theme.Palette.ContrastFg
+					}
+					lbl.Font.Weight = font.Medium
+					return lbl.Layout(gtx)
+				}),
+				layout.Rigid(layout.Spacer{Height: unit.Dp(2)}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					lbl := material.Label(ui.theme, unit.Sp(12), dateStr)
+					if isSelected {
+						lbl.Color = ui.theme.Palette.ContrastFg
+					}
+					return lbl.Layout(gtx)
+				}),
+			)
+		})
 	})
-}
-
-// getArticleSummary 获取文章摘要
-func getArticleSummary(content string, maxLen int) string {
-	if len(content) <= maxLen {
-		return content
-	}
-	return content[:maxLen] + "..."
 }
 
 // editorLayout 渲染编辑区域布局
@@ -727,18 +568,6 @@ func (ui *UI) toolbarLayoutContent(gtx layout.Context) layout.Dimensions {
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.UniformInset(unit.Dp(5)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				btn := material.Button(ui.theme, &ui.togglePreviewBtn, "预览")
-				return btn.Layout(gtx)
-			})
-		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.UniformInset(unit.Dp(5)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				btn := material.Button(ui.theme, &ui.manageCategoryBtn, "分类")
-				return btn.Layout(gtx)
-			})
-		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.UniformInset(unit.Dp(5)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				btn := material.Button(ui.theme, &ui.manageTagBtn, "标签")
 				return btn.Layout(gtx)
 			})
 		}),
@@ -1029,170 +858,4 @@ func (ui *UI) renameDialogLayout(gtx layout.Context) layout.Dimensions {
 			})
 		}),
 	)
-}
-
-// categoryDialogLayout 渲染分类管理对话框
-func (ui *UI) categoryDialogLayout(gtx layout.Context) layout.Dimensions {
-	return layout.Stack{}.Layout(gtx,
-		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
-			stack := clip.Rect{
-				Min: image.Point{},
-				Max: gtx.Constraints.Max,
-			}.Push(gtx.Ops)
-			defer stack.Pop()
-			paint.FillShape(gtx.Ops, color.NRGBA{R: 0, G: 0, B: 0, A: 200}, clip.Rect{
-				Min: image.Point{},
-				Max: gtx.Constraints.Max,
-			}.Op())
-			return layout.Dimensions{Size: gtx.Constraints.Max}
-		}),
-		layout.Stacked(func(gtx layout.Context) layout.Dimensions {
-			return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return layout.UniformInset(unit.Dp(20)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					return layout.Flex{
-						Axis: layout.Vertical,
-					}.Layout(gtx,
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							lbl := material.Label(ui.theme, unit.Sp(18), "分类管理")
-							lbl.Font.Weight = font.Bold
-							return lbl.Layout(gtx)
-						}),
-						layout.Rigid(layout.Spacer{Height: unit.Dp(15)}.Layout),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							editor := material.Editor(ui.theme, &ui.newCategoryInput, "新分类名称")
-							editor.TextSize = unit.Sp(16)
-							return editor.Layout(gtx)
-						}),
-						layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return layout.Flex{
-								Axis: layout.Horizontal,
-							}.Layout(gtx,
-								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-									return layout.UniformInset(unit.Dp(5)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-										btn := material.Button(ui.theme, &ui.addCategoryBtn, "添加")
-										return btn.Layout(gtx)
-									})
-								}),
-								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-									return layout.UniformInset(unit.Dp(5)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-										btn := material.Button(ui.theme, &ui.closeCategoryBtn, "关闭")
-										return btn.Layout(gtx)
-									})
-								}),
-							)
-						}),
-						layout.Rigid(layout.Spacer{Height: unit.Dp(15)}.Layout),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return ui.categoryListLayout(gtx)
-						}),
-					)
-				})
-			})
-		}),
-	)
-}
-
-// categoryListLayout 渲染分类列表
-func (ui *UI) categoryListLayout(gtx layout.Context) layout.Dimensions {
-	if len(ui.categories) == 0 {
-		lbl := material.Label(ui.theme, unit.Sp(14), "暂无分类")
-		return lbl.Layout(gtx)
-	}
-
-	var children []layout.FlexChild
-	for _, category := range ui.categories {
-		cat := category
-		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			lbl := material.Label(ui.theme, unit.Sp(14), cat.Name)
-			return lbl.Layout(gtx)
-		}))
-	}
-
-	return layout.Flex{
-		Axis: layout.Vertical,
-	}.Layout(gtx, children...)
-}
-
-// tagDialogLayout 渲染标签管理对话框
-func (ui *UI) tagDialogLayout(gtx layout.Context) layout.Dimensions {
-	return layout.Stack{}.Layout(gtx,
-		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
-			stack := clip.Rect{
-				Min: image.Point{},
-				Max: gtx.Constraints.Max,
-			}.Push(gtx.Ops)
-			defer stack.Pop()
-			paint.FillShape(gtx.Ops, color.NRGBA{R: 0, G: 0, B: 0, A: 200}, clip.Rect{
-				Min: image.Point{},
-				Max: gtx.Constraints.Max,
-			}.Op())
-			return layout.Dimensions{Size: gtx.Constraints.Max}
-		}),
-		layout.Stacked(func(gtx layout.Context) layout.Dimensions {
-			return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return layout.UniformInset(unit.Dp(20)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					return layout.Flex{
-						Axis: layout.Vertical,
-					}.Layout(gtx,
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							lbl := material.Label(ui.theme, unit.Sp(18), "标签管理")
-							lbl.Font.Weight = font.Bold
-							return lbl.Layout(gtx)
-						}),
-						layout.Rigid(layout.Spacer{Height: unit.Dp(15)}.Layout),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							editor := material.Editor(ui.theme, &ui.newTagInput, "新标签名称")
-							editor.TextSize = unit.Sp(16)
-							return editor.Layout(gtx)
-						}),
-						layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return layout.Flex{
-								Axis: layout.Horizontal,
-							}.Layout(gtx,
-								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-									return layout.UniformInset(unit.Dp(5)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-										btn := material.Button(ui.theme, &ui.addTagBtn, "添加")
-										return btn.Layout(gtx)
-									})
-								}),
-								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-									return layout.UniformInset(unit.Dp(5)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-										btn := material.Button(ui.theme, &ui.closeTagBtn, "关闭")
-										return btn.Layout(gtx)
-									})
-								}),
-							)
-						}),
-						layout.Rigid(layout.Spacer{Height: unit.Dp(15)}.Layout),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return ui.tagListLayout(gtx)
-						}),
-					)
-				})
-			})
-		}),
-	)
-}
-
-// tagListLayout 渲染标签列表
-func (ui *UI) tagListLayout(gtx layout.Context) layout.Dimensions {
-	if len(ui.tags) == 0 {
-		lbl := material.Label(ui.theme, unit.Sp(14), "暂无标签")
-		return lbl.Layout(gtx)
-	}
-
-	var children []layout.FlexChild
-	for _, tag := range ui.tags {
-		t := tag
-		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			lbl := material.Label(ui.theme, unit.Sp(14), t.Name)
-			return lbl.Layout(gtx)
-		}))
-	}
-
-	return layout.Flex{
-		Axis: layout.Vertical,
-	}.Layout(gtx, children...)
 }

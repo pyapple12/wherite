@@ -94,3 +94,12 @@ ENV/
 # Go executable
 wherite
 *.exe
+
+# claude
+.claude/
+
+# temp
+.temp/
+
+# History
+.history/
