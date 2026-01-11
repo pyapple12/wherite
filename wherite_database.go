@@ -3,7 +3,6 @@ package main
 import (
 	"database/sql"
 	"fmt"
-	"log"
 
 	_ "modernc.org/sqlite"
 )
@@ -245,15 +244,19 @@ func InitializeDatabase(db *sql.DB) error {
 	return nil
 }
 
-// PrintDatabaseInfo 打印数据库信息
+// PrintDatabaseInfo 打印数据库信息（当前已禁用）
 func PrintDatabaseInfo(db *sql.DB) {
-	var count int
-	err := db.QueryRow("SELECT COUNT(*) FROM articles").Scan(&count)
-	if err != nil {
-		log.Printf("获取文章数量失败: %v", err)
-		return
-	}
-	log.Printf("数据库已连接，当前有 %d 篇文章", count)
+	// 禁用打印信息以避免出现控制台窗口
+	// 如果需要调试信息，可以取消注释以下代码
+	/*
+		var count int
+		err := db.QueryRow("SELECT COUNT(*) FROM articles").Scan(&count)
+		if err != nil {
+			log.Printf("获取文章数量失败: %v", err)
+			return
+		}
+		log.Printf("数据库已连接，当前有 %d 篇文章", count)
+	*/
 }
 
 // SearchArticles 搜索文章

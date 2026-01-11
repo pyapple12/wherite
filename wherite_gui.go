@@ -656,18 +656,13 @@ func (ui *UI) toolbarLayoutContent(gtx layout.Context) layout.Dimensions {
 
 // messageLayoutContent 渲染消息内容
 func (ui *UI) messageLayoutContent(gtx layout.Context) layout.Dimensions {
-	// 检查是否有内容需要显示
-	hasTimeInfo := ui.timeInfo != ""
-	hasMessages := ui.errorMsg != "" || ui.successMsg != "" || ui.hasUnsavedChanges
-
-	if !hasTimeInfo && !hasMessages {
-		return layout.Dimensions{}
-	}
+	// 确保消息区域有固定高度，防止内容往上顶
+	minHeight := gtx.Dp(40) // 固定最小高度
 
 	var children []layout.FlexChild
 
 	// 渲染时间信息（创建时间和修改时间）- 在上面
-	if hasTimeInfo {
+	if ui.timeInfo != "" {
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			lbl := material.Label(ui.theme, unit.Sp(14), ui.timeInfo)
 			return lbl.Layout(gtx)
@@ -699,9 +694,17 @@ func (ui *UI) messageLayoutContent(gtx layout.Context) layout.Dimensions {
 		}))
 	}
 
-	return layout.Flex{
+	// 渲染内容
+	content := layout.Flex{
 		Axis: layout.Vertical,
 	}.Layout(gtx, children...)
+
+	// 确保消息区域至少有最小高度
+	if content.Size.Y < minHeight {
+		content.Size.Y = minHeight
+	}
+
+	return content
 }
 
 // titleEditorLayoutContent 渲染标题编辑器内容
