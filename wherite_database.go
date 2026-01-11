@@ -55,7 +55,7 @@ func GetArticleByID(db *sql.DB, id int) (*Article, error) {
 
 // UpdateArticleByID 根据ID更新文章
 func UpdateArticleByID(db *sql.DB, id int, title, content string) error {
-	query := "UPDATE articles SET title = ?, content = ? WHERE id = ?"
+	query := "UPDATE articles SET title = ?, content = ?, updated_at = datetime('now', 'localtime') WHERE id = ?"
 	result, err := db.Exec(query, title, content, id)
 	if err != nil {
 		return fmt.Errorf("更新失败: %w", err)

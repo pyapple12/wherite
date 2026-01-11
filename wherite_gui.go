@@ -50,6 +50,9 @@ type UI struct {
 	isSearching       bool
 	articleList       widget.List
 	previewList       widget.List
+	hasUnsavedChanges bool   // 是否有未保存的更改
+	originalTitle     string // 文章原始标题（用于比较）
+	originalContent   string // 文章原始内容（用于比较）
 }
 
 // NewUI 创建一个新的UI实例
@@ -99,6 +102,9 @@ func (ui *UI) Layout(gtx layout.Context, w *app.Window) {
 		ui.successMsg = ""
 		ui.successMsgTime = time.Time{}
 	}
+
+	// 检查是否有未保存的更改
+	ui.hasUnsavedChanges = (ui.titleInput.Text() != ui.originalTitle) || (ui.contentInput.Text() != ui.originalContent)
 
 	if ui.toggleSidebarBtn.Clicked(gtx) {
 		ui.sidebarCollapsed = !ui.sidebarCollapsed
@@ -211,7 +217,15 @@ func (ui *UI) saveArticle() {
 		ui.errorMsg = ""
 		ui.successMsg = "创建成功！"
 		ui.successMsgTime = time.Now()
+		ui.originalTitle = title
+		ui.originalContent = content
+		ui.hasUnsavedChanges = false
 		ui.loadArticles()
+
+		// 重新获取文章数据以显示正确的时间信息
+		if article, err := GetArticleByID(ui.db, int(id)); err == nil {
+			ui.successMsg = fmt.Sprintf("创建成功！ | 创建时间: %s | 修改时间: %s", article.CreatedAt, article.UpdatedAt)
+		}
 	} else {
 		idStr := ui.idInput.Text()
 		if idStr == "" {
@@ -233,7 +247,15 @@ func (ui *UI) saveArticle() {
 		ui.errorMsg = ""
 		ui.successMsg = "保存成功！"
 		ui.successMsgTime = time.Now()
+		ui.originalTitle = title
+		ui.originalContent = content
+		ui.hasUnsavedChanges = false
 		ui.loadArticles()
+
+		// 重新获取文章数据以显示正确的时间信息
+		if article, err := GetArticleByID(ui.db, id); err == nil {
+			ui.successMsg = fmt.Sprintf("保存成功！ | 创建时间: %s | 修改时间: %s", article.CreatedAt, article.UpdatedAt)
+		}
 	}
 }
 
@@ -258,6 +280,9 @@ func (ui *UI) selectArticle(id int) {
 	}
 	ui.titleInput.SetText(article.Title)
 	ui.contentInput.SetText(article.Content)
+	ui.originalTitle = article.Title
+	ui.originalContent = article.Content
+	ui.hasUnsavedChanges = false
 	ui.idInput.SetText(strconv.Itoa(id))
 	ui.isCreating = false
 	ui.errorMsg = ""
@@ -629,7 +654,7 @@ func (ui *UI) toolbarLayoutContent(gtx layout.Context) layout.Dimensions {
 
 // messageLayoutContent 渲染消息内容
 func (ui *UI) messageLayoutContent(gtx layout.Context) layout.Dimensions {
-	if ui.errorMsg == "" && ui.successMsg == "" {
+	if ui.errorMsg == "" && ui.successMsg == "" && !ui.hasUnsavedChanges {
 		return layout.Dimensions{}
 	}
 
@@ -647,6 +672,14 @@ func (ui *UI) messageLayoutContent(gtx layout.Context) layout.Dimensions {
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			if ui.successMsg != "" {
 				lbl := material.Label(ui.theme, unit.Sp(14), ui.successMsg)
+				return lbl.Layout(gtx)
+			}
+			return layout.Dimensions{}
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if ui.hasUnsavedChanges {
+				lbl := material.Label(ui.theme, unit.Sp(14), "未保存……")
+				lbl.Color = color.NRGBA{R: 255, G: 165, B: 0, A: 255} // 橙色提示
 				return lbl.Layout(gtx)
 			}
 			return layout.Dimensions{}
