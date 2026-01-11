@@ -677,7 +677,7 @@ func (ui *UI) renderHeading(gtx layout.Context, block MarkdownBlock) layout.Dime
 	fontWeight := font.Bold
 
 	if len(block.Inlines) > 0 {
-		return ui.renderInlines(gtx, block.Inlines, fontSize, fontWeight, false)
+		return ui.renderInlines(gtx, block.Inlines, fontSize)
 	}
 
 	lbl := material.Label(ui.theme, fontSize, block.Content)
@@ -694,7 +694,7 @@ func (ui *UI) renderParagraph(gtx layout.Context, text string) layout.Dimensions
 	// 解析行内元素
 	inlines := ParseInlines(text)
 	if len(inlines) > 0 {
-		return ui.renderInlines(gtx, inlines, unit.Sp(16), font.Normal, false)
+		return ui.renderInlines(gtx, inlines, unit.Sp(16))
 	}
 
 	lbl := material.Label(ui.theme, unit.Sp(16), text)
@@ -702,12 +702,12 @@ func (ui *UI) renderParagraph(gtx layout.Context, text string) layout.Dimensions
 }
 
 // renderInlines 渲染行内元素
-func (ui *UI) renderInlines(gtx layout.Context, inlines []InlineElement, baseSize unit.Sp, baseWeight font.Weight, isCodeBlock bool) layout.Dimensions {
+func (ui *UI) renderInlines(gtx layout.Context, inlines []InlineElement, baseSize unit.Sp) layout.Dimensions {
 	var children []layout.FlexChild
 	for _, inline := range inlines {
 		inlineCopy := inline
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return ui.renderInline(gtx, inlineCopy, baseSize, baseWeight, isCodeBlock)
+			return ui.renderInline(gtx, inlineCopy, baseSize)
 		}))
 	}
 	return layout.Flex{
@@ -716,7 +716,7 @@ func (ui *UI) renderInlines(gtx layout.Context, inlines []InlineElement, baseSiz
 }
 
 // renderInline 渲染单个行内元素
-func (ui *UI) renderInline(gtx layout.Context, inline InlineElement, baseSize unit.Sp, baseWeight font.Weight, isCodeBlock bool) layout.Dimensions {
+func (ui *UI) renderInline(gtx layout.Context, inline InlineElement, baseSize unit.Sp) layout.Dimensions {
 	size := baseSize
 	text := inline.Text
 
@@ -981,7 +981,7 @@ func (ui *UI) renderQuote(gtx layout.Context, text string) layout.Dimensions {
 						if len(lineCopy) > 0 {
 							inlines := ParseInlines(lineCopy)
 							if len(inlines) > 0 {
-								return ui.renderInlines(gtx, inlines, unit.Sp(16), font.Normal, false)
+								return ui.renderInlines(gtx, inlines, unit.Sp(16))
 							}
 						}
 						lbl := material.Label(ui.theme, unit.Sp(16), lineCopy)
@@ -1052,11 +1052,10 @@ func (ui *UI) renderTable(gtx layout.Context, block MarkdownBlock) layout.Dimens
 		headerCells := make([]layout.FlexChild, len(headers))
 		for j, header := range headers {
 			headerCopy := header
-			isLastCol := j == len(headers)-1
 			headerCells[j] = layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				lbl := material.Label(ui.theme, unit.Sp(14), headerCopy)
 				lbl.Font.Weight = font.Bold
-				return ui.renderTableCell(gtx, lbl, headerBgColor, borderColor, cellPaddingPx, vertPadding, isLastCol)
+				return ui.renderTableCell(gtx, lbl, headerBgColor, borderColor, cellPaddingPx, vertPadding)
 			})
 		}
 		return layout.Flex{Axis: layout.Horizontal}.Layout(gtx, headerCells...)
@@ -1073,10 +1072,9 @@ func (ui *UI) renderTable(gtx layout.Context, block MarkdownBlock) layout.Dimens
 					cellText = rowCopy[j]
 				}
 				cellCopy := cellText
-				isLastCol := j == colCount-1
-				rowCells[j] = layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					rowCells[j] = layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					lbl := material.Label(ui.theme, unit.Sp(14), cellCopy)
-					return ui.renderTableCell(gtx, lbl, color.NRGBA{}, borderColor, cellPaddingPx, vertPadding, isLastCol)
+					return ui.renderTableCell(gtx, lbl, color.NRGBA{}, borderColor, cellPaddingPx, vertPadding)
 				})
 			}
 			return layout.Flex{Axis: layout.Horizontal}.Layout(gtx, rowCells...)
@@ -1089,7 +1087,7 @@ func (ui *UI) renderTable(gtx layout.Context, block MarkdownBlock) layout.Dimens
 }
 
 // renderTableCell 渲染单个表格单元格（带边框）
-func (ui *UI) renderTableCell(gtx layout.Context, lbl material.LabelStyle, bgColor color.NRGBA, borderColor color.NRGBA, paddingPx int, vertPadding int, isLastCol bool) layout.Dimensions {
+func (ui *UI) renderTableCell(gtx layout.Context, lbl material.LabelStyle, bgColor color.NRGBA, borderColor color.NRGBA, paddingPx int, vertPadding int) layout.Dimensions {
 	return layout.Inset{Left: unit.Dp(float32(paddingPx)), Right: unit.Dp(float32(paddingPx)), Top: unit.Dp(float32(vertPadding)), Bottom: unit.Dp(float32(vertPadding))}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		// 获取文字尺寸
 		macro := op.Record(gtx.Ops)

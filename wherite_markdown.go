@@ -472,7 +472,7 @@ func splitTableRow(row string) []string {
 		if c == '|' && depth == 0 {
 			cells = append(cells, strings.TrimSpace(cell))
 			cell = ""
-		} else if c == '`' || c == '`' {
+		} else if c == '`' {
 			// 处理反引号内的 |
 			cell += string(c)
 		} else {
