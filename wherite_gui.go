@@ -6,6 +6,7 @@ import (
 	"image"
 	"image/color"
 	"strconv"
+	"strings"
 
 	"gioui.org/app"
 	"gioui.org/font"
@@ -41,16 +42,12 @@ type UI struct {
 	togglePreviewBtn  widget.Clickable
 	renderedHTML      string
 	articleClickables map[int]*widget.Clickable
-	renameBtn         widget.Clickable
-	showRenameDialog  bool
-	renameTitleInput  widget.Editor
-	confirmRenameBtn  widget.Clickable
-	cancelRenameBtn   widget.Clickable
 	searchInput       widget.Editor
 	searchBtn         widget.Clickable
 	clearSearchBtn    widget.Clickable
 	isSearching       bool
 	articleList       widget.List
+	previewList       widget.List
 }
 
 // NewUI 创建一个新的UI实例
@@ -64,7 +61,6 @@ func NewUI(db *sql.DB) *UI {
 	ui.idInput.SingleLine = true
 	ui.idInput.Submit = true
 	ui.titleInput.SingleLine = true
-	ui.renameTitleInput.SingleLine = true
 	ui.searchInput.SingleLine = true
 	ui.loadArticles()
 	return ui
@@ -114,24 +110,6 @@ func (ui *UI) Layout(gtx layout.Context, w *app.Window) {
 		}
 	}
 
-	if ui.renameBtn.Clicked(gtx) {
-		if ui.selectedArticleID != -1 {
-			ui.showRenameDialog = true
-			ui.renameTitleInput.SetText(ui.titleInput.Text())
-		} else {
-			ui.errorMsg = "请先选择要重命名的文章"
-		}
-	}
-
-	if ui.confirmRenameBtn.Clicked(gtx) {
-		ui.confirmRename()
-	}
-
-	if ui.cancelRenameBtn.Clicked(gtx) {
-		ui.showRenameDialog = false
-		ui.renameTitleInput.SetText("")
-	}
-
 	if ui.searchBtn.Clicked(gtx) {
 		ui.searchArticles()
 	}
@@ -154,10 +132,6 @@ func (ui *UI) Layout(gtx layout.Context, w *app.Window) {
 		layout.Rigid(ui.sidebarLayout()),
 		layout.Flexed(1, ui.editorLayout()),
 	)
-
-	if ui.showRenameDialog {
-		ui.renameDialogLayout(gtx)
-	}
 }
 
 // queryArticle 查询文章
@@ -244,6 +218,7 @@ func (ui *UI) saveArticle() {
 		}
 		ui.errorMsg = ""
 		ui.successMsg = "保存成功！"
+		ui.loadArticles()
 	}
 }
 
@@ -311,28 +286,6 @@ func (ui *UI) loadArticles() {
 	}
 }
 
-// confirmRename 确认重命名
-func (ui *UI) confirmRename() {
-	newTitle := ui.renameTitleInput.Text()
-	if newTitle == "" {
-		ui.errorMsg = "标题不能为空"
-		return
-	}
-
-	err := RenameArticleByID(ui.db, ui.selectedArticleID, newTitle)
-	if err != nil {
-		ui.errorMsg = fmt.Sprintf("重命名失败: %v", err)
-		return
-	}
-
-	ui.titleInput.SetText(newTitle)
-	ui.showRenameDialog = false
-	ui.renameTitleInput.SetText("")
-	ui.errorMsg = ""
-	ui.successMsg = "重命名成功！"
-	ui.loadArticles()
-}
-
 // searchArticles 搜索文章
 func (ui *UI) searchArticles() {
 	keyword := ui.searchInput.Text()
@@ -370,19 +323,8 @@ func (ui *UI) sidebarLayout() layout.Widget {
 			// 折叠状态：显示一个小按钮切换回展开状态
 			gtx.Constraints.Max.X = 60
 			return layout.UniformInset(unit.Dp(5)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return layout.Flex{
-					Axis: layout.Vertical,
-				}.Layout(gtx,
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						btn := material.Button(ui.theme, &ui.toggleSidebarBtn, "☰")
-						return btn.Layout(gtx)
-					}),
-					layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						btn := material.Button(ui.theme, &ui.newArticleBtn, "+")
-						return btn.Layout(gtx)
-					}),
-				)
+				btn := material.Button(ui.theme, &ui.toggleSidebarBtn, "☰")
+				return btn.Layout(gtx)
 			})
 		}
 
@@ -412,13 +354,8 @@ func (ui *UI) sidebarLayout() layout.Widget {
 					return ui.searchLayout(gtx)
 				}),
 				layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 					return ui.articleListLayoutContent(gtx)
-				}),
-				layout.Flexed(1, layout.Spacer{}.Layout),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					btn := material.Button(ui.theme, &ui.newArticleBtn, "新建文章")
-					return btn.Layout(gtx)
 				}),
 			)
 		})
@@ -573,7 +510,7 @@ func (ui *UI) toolbarLayoutContent(gtx layout.Context) layout.Dimensions {
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.UniformInset(unit.Dp(5)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				btn := material.Button(ui.theme, &ui.renameBtn, "重命名")
+				btn := material.Button(ui.theme, &ui.newArticleBtn, "新建")
 				return btn.Layout(gtx)
 			})
 		}),
@@ -672,8 +609,18 @@ func (ui *UI) previewLayout(gtx layout.Context) layout.Dimensions {
 		return lbl.Layout(gtx)
 	}
 
-	return layout.UniformInset(unit.Dp(10)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return ui.renderMarkdownBlocks(blocks)(gtx)
+	if len(blocks) == 0 {
+		lbl := material.Label(ui.theme, unit.Sp(14), "无内容")
+		return lbl.Layout(gtx)
+	}
+
+	// 配置预览列表为可滚动
+	ui.previewList.Axis = layout.Vertical
+
+	return ui.previewList.Layout(gtx, len(blocks), func(gtx layout.Context, index int) layout.Dimensions {
+		return layout.UniformInset(unit.Dp(5)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return ui.renderMarkdownBlock(gtx, blocks[index])
+		})
 	})
 }
 
@@ -681,7 +628,15 @@ func (ui *UI) previewLayout(gtx layout.Context) layout.Dimensions {
 func (ui *UI) renderMarkdownBlocks(blocks []MarkdownBlock) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
 		var children []layout.FlexChild
-		for _, block := range blocks {
+		for i, block := range blocks {
+			if i > 0 {
+				// 代码块之间添加更大间距
+				spacing := unit.Dp(8)
+				if block.Type == BlockTypeCode {
+					spacing = unit.Dp(16)
+				}
+				children = append(children, layout.Rigid(layout.Spacer{Height: spacing}.Layout))
+			}
 			children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				return ui.renderMarkdownBlock(gtx, block)
 			}))
@@ -700,7 +655,7 @@ func (ui *UI) renderMarkdownBlock(gtx layout.Context, block MarkdownBlock) layou
 	case BlockTypeParagraph:
 		return ui.renderParagraph(gtx, block.Content)
 	case BlockTypeCode:
-		return ui.renderCodeBlock(gtx, block.Content)
+		return ui.renderCodeBlock(gtx, block)
 	case BlockTypeList:
 		return ui.renderListItem(gtx, block.Content)
 	case BlockTypeQuote:
@@ -717,6 +672,10 @@ func (ui *UI) renderHeading(gtx layout.Context, block MarkdownBlock) layout.Dime
 	fontSize := unit.Sp(24 - block.Level*2)
 	fontWeight := font.Bold
 
+	if len(block.Inlines) > 0 {
+		return ui.renderInlines(gtx, block.Inlines, fontSize, fontWeight, false)
+	}
+
 	lbl := material.Label(ui.theme, fontSize, block.Content)
 	lbl.Font.Weight = fontWeight
 	return lbl.Layout(gtx)
@@ -724,26 +683,200 @@ func (ui *UI) renderHeading(gtx layout.Context, block MarkdownBlock) layout.Dime
 
 // renderParagraph 渲染段落
 func (ui *UI) renderParagraph(gtx layout.Context, text string) layout.Dimensions {
+	if len(text) == 0 {
+		return layout.Dimensions{}
+	}
+
+	// 解析行内元素
+	inlines := ParseInlines(text)
+	if len(inlines) > 0 {
+		return ui.renderInlines(gtx, inlines, unit.Sp(16), font.Normal, false)
+	}
+
 	lbl := material.Label(ui.theme, unit.Sp(16), text)
 	return lbl.Layout(gtx)
 }
 
-// renderCodeBlock 渲染代码块
-func (ui *UI) renderCodeBlock(gtx layout.Context, code string) layout.Dimensions {
-	return layout.UniformInset(unit.Dp(10)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+// renderInlines 渲染行内元素
+func (ui *UI) renderInlines(gtx layout.Context, inlines []InlineElement, baseSize unit.Sp, baseWeight font.Weight, isCodeBlock bool) layout.Dimensions {
+	var children []layout.FlexChild
+	for _, inline := range inlines {
+		inlineCopy := inline
+		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return ui.renderInline(gtx, inlineCopy, baseSize, baseWeight, isCodeBlock)
+		}))
+	}
+	return layout.Flex{
+		Axis: layout.Horizontal,
+	}.Layout(gtx, children...)
+}
+
+// renderInline 渲染单个行内元素
+func (ui *UI) renderInline(gtx layout.Context, inline InlineElement, baseSize unit.Sp, baseWeight font.Weight, isCodeBlock bool) layout.Dimensions {
+	size := baseSize
+	text := inline.Text
+
+	// 检查是否是加粗斜体组合
+	isBoldItalic := int(inline.Type)&0x10 != 0
+	isItalic := inline.Type == InlineTypeItalic || isBoldItalic
+
+	switch inline.Type {
+	case InlineTypeBold, InlineTypeBold | 0x10:
+		lbl := material.Label(ui.theme, size, text)
+		lbl.Font.Weight = font.Bold
+		// 绘制背景（在文字之前）
+		bgColor := color.NRGBA{}
+		ui.drawInlineBackground(gtx, lbl, bgColor)
+		dims := lbl.Layout(gtx)
+		// 斜体使用下划线表示
+		if isItalic {
+			ui.drawItalicTransform(gtx, dims)
+		}
+		return dims
+	case InlineTypeItalic:
+		lbl := material.Label(ui.theme, size, text)
+		// 绘制背景
+		ui.drawInlineBackground(gtx, lbl, color.NRGBA{})
+		dims := lbl.Layout(gtx)
+		// 斜体使用下划线表示
+		ui.drawItalicTransform(gtx, dims)
+		return dims
+	case InlineTypeStrike:
+		lbl := material.Label(ui.theme, size, text)
+		// 绘制删除线
+		dims := lbl.Layout(gtx)
+		textSize := dims.Size
+		if textSize.X > 0 && textSize.Y > 0 {
+			lineOp := clip.Rect{
+				Min: image.Point{X: 0, Y: textSize.Y/2 - 1},
+				Max: image.Point{X: textSize.X, Y: textSize.Y/2 + 1},
+			}.Op()
+			paint.FillShape(gtx.Ops, color.NRGBA{R: 128, G: 128, B: 128, A: 255}, lineOp)
+		}
+		return dims
+	case InlineTypeCode:
+		lbl := material.Label(ui.theme, size, text)
+		lbl.Font.Typeface = "monospace"
+		// 先绘制背景
+		ui.drawInlineBackground(gtx, lbl, color.NRGBA{R: 240, G: 240, B: 240, A: 255})
+		// 再绘制文字
+		return lbl.Layout(gtx)
+	case InlineTypeLink:
+		// 渲染为 "text (url)" 格式
+		displayText := text
+		if inline.URL != "" {
+			displayText = text + " (" + inline.URL + ")"
+		}
+		lbl := material.Label(ui.theme, size, displayText)
+		lbl.Color = color.NRGBA{R: 0, G: 122, B: 255, A: 255} // 蓝色链接颜色
+		return lbl.Layout(gtx)
+	default:
+		lbl := material.Label(ui.theme, size, text)
+		return lbl.Layout(gtx)
+	}
+}
+
+// drawItalicTransform 绘制斜体变换效果
+// 注意：Gio 的 material 主题不直接支持斜体，使用下划线作为视觉提示
+func (ui *UI) drawItalicTransform(gtx layout.Context, dims layout.Dimensions) {
+	textSize := dims.Size
+	if textSize.X > 0 && textSize.Y > 0 {
+		// 绘制下划线表示斜体
+		underlineY := textSize.Y - 4
+		if underlineY < textSize.Y-2 {
+			underlineY = textSize.Y - 2
+		}
+		lineOp := clip.Rect{
+			Min: image.Point{X: 0, Y: underlineY},
+			Max: image.Point{X: textSize.X, Y: underlineY + 1},
+		}.Op()
+		paint.FillShape(gtx.Ops, color.NRGBA{R: 100, G: 100, B: 200, A: 255}, lineOp)
+	}
+}
+
+// drawInlineBackground 绘制行内元素背景（先于文字绘制）
+func (ui *UI) drawInlineBackground(gtx layout.Context, lbl material.LabelStyle, bgColor color.NRGBA) {
+	if bgColor.A == 0 {
+		return
+	}
+	// 使用记录操作来获取文字尺寸
+	macro := op.Record(gtx.Ops)
+	dims := lbl.Layout(gtx)
+	macro.Stop()
+
+	textSize := dims.Size
+	if textSize.X > 0 && textSize.Y > 0 {
 		stack := clip.Rect{
-			Min: image.Point{},
-			Max: gtx.Constraints.Max,
+			Min: image.Point{X: 0, Y: 2},
+			Max: image.Point{X: textSize.X, Y: textSize.Y - 2},
 		}.Push(gtx.Ops)
-		defer stack.Pop()
-		paint.FillShape(gtx.Ops, ui.theme.Palette.ContrastBg, clip.Rect{
+		paint.FillShape(gtx.Ops, bgColor, clip.Rect{
+			Min: image.Point{X: 0, Y: 2},
+			Max: image.Point{X: textSize.X, Y: textSize.Y - 2},
+		}.Op())
+		stack.Pop()
+	}
+}
+
+// renderCodeBlock 渲染代码块
+func (ui *UI) renderCodeBlock(gtx layout.Context, block MarkdownBlock) layout.Dimensions {
+	code := block.Content
+
+	// 分割代码为多行
+	lines := splitLines(code)
+	if len(lines) == 0 {
+		return layout.Dimensions{}
+	}
+
+	// 提取语言标识符（第一行可能是语言名，如 ```go）
+	codeLines := lines
+	if len(lines) > 0 && len(lines[0]) > 3 && lines[0][:3] == "```" {
+		// 第一行是代码块标记 ```lang，提取语言名并跳过这行
+		lang := strings.TrimSpace(lines[0][3:])
+		if len(lang) > 0 {
+			// 有语言标识符，跳过第一行
+			codeLines = lines[1:]
+		}
+	}
+	// 过滤掉可能的结束标记行（```）
+	for len(codeLines) > 0 && len(codeLines[0]) >= 3 && codeLines[0][:3] == "```" {
+		codeLines = codeLines[1:]
+	}
+
+	// 渲染背景
+	bgColor := color.NRGBA{R: 245, G: 245, B: 245, A: 255} // 浅灰色背景
+	codePadding := unit.Dp(8)                               // 代码内容内边距
+
+	return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		// 先渲染代码内容（带内边距）获取尺寸
+		var codeDims layout.Dimensions
+		var codeWidget layout.Widget = func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Left: codePadding, Right: codePadding, Top: codePadding, Bottom: codePadding}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				var children []layout.FlexChild
+				for i, line := range codeLines {
+					if i > 0 {
+						children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout))
+					}
+					lineCopy := line
+					children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						lbl := material.Label(ui.theme, unit.Sp(14), lineCopy)
+						lbl.Font.Typeface = "monospace"
+						return lbl.Layout(gtx)
+					}))
+				}
+				return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+			})
+		}
+		codeDims = codeWidget(gtx)
+
+		// 绘制背景（使用内容尺寸）
+		paint.FillShape(gtx.Ops, bgColor, clip.Rect{
 			Min: image.Point{},
-			Max: gtx.Constraints.Max,
+			Max: image.Point{X: codeDims.Size.X, Y: codeDims.Size.Y},
 		}.Op())
 
-		lbl := material.Label(ui.theme, unit.Sp(14), code)
-		lbl.Font.Typeface = "monospace"
-		return lbl.Layout(gtx)
+		// 重新渲染代码内容（现在背景已绘制）
+		return codeWidget(gtx)
 	})
 }
 
@@ -765,20 +898,62 @@ func (ui *UI) renderListItem(gtx layout.Context, text string) layout.Dimensions 
 
 // renderQuote 渲染引用
 func (ui *UI) renderQuote(gtx layout.Context, text string) layout.Dimensions {
-	return layout.UniformInset(unit.Dp(10)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		stack := clip.Rect{
-			Min: image.Point{},
-			Max: gtx.Constraints.Max,
-		}.Push(gtx.Ops)
-		defer stack.Pop()
-		paint.FillShape(gtx.Ops, ui.theme.Palette.ContrastBg, clip.Rect{
-			Min: image.Point{},
-			Max: gtx.Constraints.Max,
-		}.Op())
+	// 分割多行
+	lines := splitLines(text)
+	if len(lines) == 0 {
+		return layout.Dimensions{}
+	}
 
-		lbl := material.Label(ui.theme, unit.Sp(16), text)
-		lbl.Font.Style = font.Italic
-		return lbl.Layout(gtx)
+	return layout.UniformInset(unit.Dp(10)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		var children []layout.FlexChild
+
+		for lineIndex, line := range lines {
+			if lineIndex > 0 {
+				children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout))
+			}
+
+			// 渲染每一行
+			children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				lineCopy := line
+				return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+					// 左边框
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						// 绘制左边框，只在文字高度范围内
+						dims := material.Label(ui.theme, unit.Sp(16), " ").Layout(gtx)
+						borderWidth := 4
+						borderHeight := dims.Size.Y
+						if borderHeight == 0 {
+							borderHeight = 16
+						}
+						stack := clip.Rect{
+							Min: image.Point{},
+							Max: image.Point{X: borderWidth, Y: borderHeight},
+						}.Push(gtx.Ops)
+						paint.FillShape(gtx.Ops, ui.theme.Palette.ContrastBg, clip.Rect{
+							Min: image.Point{},
+							Max: image.Point{X: borderWidth, Y: borderHeight},
+						}.Op())
+						stack.Pop()
+						return layout.Dimensions{Size: image.Point{X: borderWidth, Y: borderHeight}}
+					}),
+					// 间距
+					layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+					// 文字内容
+					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+						if len(lineCopy) > 0 {
+							inlines := ParseInlines(lineCopy)
+							if len(inlines) > 0 {
+								return ui.renderInlines(gtx, inlines, unit.Sp(16), font.Normal, false)
+							}
+						}
+						lbl := material.Label(ui.theme, unit.Sp(16), lineCopy)
+						return lbl.Layout(gtx)
+					}),
+				)
+			}))
+		}
+
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 	})
 }
 
@@ -802,60 +977,3 @@ func (ui *UI) renderHorizontalRule(gtx layout.Context) layout.Dimensions {
 	})
 }
 
-// renameDialogLayout 渲染重命名对话框
-func (ui *UI) renameDialogLayout(gtx layout.Context) layout.Dimensions {
-	return layout.Stack{}.Layout(gtx,
-		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
-			stack := clip.Rect{
-				Min: image.Point{},
-				Max: gtx.Constraints.Max,
-			}.Push(gtx.Ops)
-			defer stack.Pop()
-			paint.FillShape(gtx.Ops, color.NRGBA{R: 0, G: 0, B: 0, A: 200}, clip.Rect{
-				Min: image.Point{},
-				Max: gtx.Constraints.Max,
-			}.Op())
-			return layout.Dimensions{Size: gtx.Constraints.Max}
-		}),
-		layout.Stacked(func(gtx layout.Context) layout.Dimensions {
-			return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return layout.UniformInset(unit.Dp(20)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					return layout.Flex{
-						Axis: layout.Vertical,
-					}.Layout(gtx,
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							lbl := material.Label(ui.theme, unit.Sp(18), "重命名文章")
-							lbl.Font.Weight = font.Bold
-							return lbl.Layout(gtx)
-						}),
-						layout.Rigid(layout.Spacer{Height: unit.Dp(15)}.Layout),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							editor := material.Editor(ui.theme, &ui.renameTitleInput, "新标题")
-							editor.TextSize = unit.Sp(16)
-							return editor.Layout(gtx)
-						}),
-						layout.Rigid(layout.Spacer{Height: unit.Dp(15)}.Layout),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return layout.Flex{
-								Axis: layout.Horizontal,
-							}.Layout(gtx,
-								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-									return layout.UniformInset(unit.Dp(5)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-										btn := material.Button(ui.theme, &ui.confirmRenameBtn, "确认")
-										return btn.Layout(gtx)
-									})
-								}),
-								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-									return layout.UniformInset(unit.Dp(5)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-										btn := material.Button(ui.theme, &ui.cancelRenameBtn, "取消")
-										return btn.Layout(gtx)
-									})
-								}),
-							)
-						}),
-					)
-				})
-			})
-		}),
-	)
-}
