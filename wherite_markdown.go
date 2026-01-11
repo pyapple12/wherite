@@ -106,6 +106,19 @@ func ParseMarkdownBlock(markdown string) ([]MarkdownBlock, error) {
 			continue
 		}
 
+		// 处理表格（多行）
+		if isTableLine(line) {
+			endIndex, tableData := parseTable(lines, i)
+			if tableData != nil && len(tableData.Headers) > 0 {
+				blocks = append(blocks, MarkdownBlock{
+					Type:      BlockTypeTable,
+					TableData: tableData,
+				})
+			}
+			i = endIndex
+			continue
+		}
+
 		// 处理其他单行块
 		block := parseLine(line)
 		if block.Type != BlockTypeEmpty {
@@ -119,10 +132,24 @@ func ParseMarkdownBlock(markdown string) ([]MarkdownBlock, error) {
 
 // MarkdownBlock 表示一个Markdown块
 type MarkdownBlock struct {
-	Type    BlockType
-	Content string
-	Level   int
-	Inlines []InlineElement
+	Type      BlockType
+	Content   string
+	Level     int
+	Inlines   []InlineElement
+	TableData *TableData     // 对于表格类型
+	TaskData  *TaskListData  // 对于任务列表类型
+}
+
+// TaskListData 表示任务列表数据
+type TaskListData struct {
+	Checked   bool   // 是否已完成
+	Content   string // 任务内容
+}
+
+// TableData 表示表格数据
+type TableData struct {
+	Headers []string
+	Rows    [][]string
 }
 
 // BlockType 块类型
@@ -134,8 +161,10 @@ const (
 	BlockTypeParagraph
 	BlockTypeCode
 	BlockTypeList
+	BlockTypeTaskList
 	BlockTypeQuote
 	BlockTypeHorizontalRule
+	BlockTypeTable
 )
 
 // InlineElement 表示行内元素
@@ -183,6 +212,17 @@ func parseLine(line string) MarkdownBlock {
 		return MarkdownBlock{
 			Type:    BlockTypeList,
 			Content: line,
+		}
+	}
+
+	if isTaskItem(line) {
+		checked, content := parseTaskItem(line)
+		return MarkdownBlock{
+			Type: BlockTypeTaskList,
+			TaskData: &TaskListData{
+				Checked:  checked,
+				Content: content,
+			},
 		}
 	}
 
@@ -288,6 +328,79 @@ func isListItem(line string) bool {
 	return false
 }
 
+// isTaskItem 判断是否为任务列表项 [ ] 或 [x] 或 []（无空格）
+func isTaskItem(line string) bool {
+	if len(line) < 4 {
+		return false
+	}
+	if line[0] != '[' {
+		return false
+	}
+
+	// 检查第二个字符：空格、x、X 或 ]
+	secondChar := line[1]
+	if secondChar != ' ' && secondChar != 'x' && secondChar != 'X' && secondChar != ']' {
+		return false
+	}
+
+	// 确定闭合的 ] 位置
+	var closingBracket int
+	if secondChar == ']' {
+		// 如果第二个字符就是 ]，那么闭合的 ] 在索引 1
+		closingBracket = 1
+	} else {
+		// 否则从索引 2 开始查找 ]
+		closingBracket = -1
+		for i := 2; i < len(line); i++ {
+			if line[i] == ']' {
+				closingBracket = i
+				break
+			}
+		}
+		if closingBracket == -1 {
+			return false
+		}
+	}
+
+	// 确保 ] 后面（如果还有字符）是空格
+	if closingBracket+1 < len(line) && line[closingBracket+1] != ' ' {
+		return false
+	}
+
+	return true
+}
+
+// parseTaskItem 解析任务列表项，返回是否完成和内容
+func parseTaskItem(line string) (checked bool, content string) {
+	if len(line) < 4 {
+		return false, line
+	}
+	checked = (line[1] == 'x' || line[1] == 'X')
+
+	// 确定闭合的 ] 位置
+	var closingBracket int
+	if line[1] == ']' {
+		// 如果第二个字符就是 ]，那么闭合的 ] 在索引 1
+		closingBracket = 1
+	} else {
+		// 否则从索引 2 开始查找 ]
+		closingBracket = -1
+		for i := 2; i < len(line); i++ {
+			if line[i] == ']' {
+				closingBracket = i
+				break
+			}
+		}
+		if closingBracket == -1 {
+			return checked, line
+		}
+	}
+
+	// 去掉 [x] 或 [ ] 部分，获取剩余内容
+	content = strings.TrimSpace(line[closingBracket+1:])
+	return checked, content
+}
+
 // isQuote 判断是否为引用
 func isQuote(line string) bool {
 	return len(line) > 0 && line[0] == '>'
@@ -311,6 +424,95 @@ func isHorizontalRule(line string) bool {
 	}
 
 	return true
+}
+
+// isTableLine 判断行是否为表格行（以 | 开头或包含 |）
+func isTableLine(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	return len(trimmed) > 0 && (trimmed[0] == '|' || strings.Contains(trimmed, " | "))
+}
+
+// isTableSeparator 判断行是否为表格分隔行（如 |---|）
+func isTableSeparator(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if len(trimmed) < 3 || trimmed[0] != '|' {
+		return false
+	}
+
+	// 检查是否是分隔行：|---| 或 |:---|:|
+	for _, cell := range splitTableRow(trimmed) {
+		cell = strings.TrimSpace(cell)
+		if len(cell) == 0 {
+			continue
+		}
+		// 分隔行只能包含 -、:、空格
+		for _, c := range cell {
+			if c != '-' && c != ':' && c != ' ' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// splitTableRow 分割表格行
+func splitTableRow(row string) []string {
+	row = strings.TrimSpace(row)
+	if row[0] == '|' {
+		row = row[1:]
+	}
+	if len(row) > 0 && row[len(row)-1] == '|' {
+		row = row[:len(row)-1]
+	}
+
+	var cells []string
+	cell := ""
+	depth := 0
+	for _, c := range row {
+		if c == '|' && depth == 0 {
+			cells = append(cells, strings.TrimSpace(cell))
+			cell = ""
+		} else if c == '`' || c == '`' {
+			// 处理反引号内的 |
+			cell += string(c)
+		} else {
+			cell += string(c)
+		}
+	}
+	if len(cell) > 0 {
+		cells = append(cells, strings.TrimSpace(cell))
+	}
+	return cells
+}
+
+// parseTable 解析表格
+func parseTable(lines []string, start int) (int, *TableData) {
+	var headers []string
+	var rows [][]string
+	i := start
+
+	// 第一行是表头
+	if i < len(lines) && isTableLine(lines[i]) {
+		headers = splitTableRow(lines[i])
+		i++
+	}
+
+	// 第二行是分隔行
+	if i < len(lines) && isTableSeparator(lines[i]) {
+		i++
+	}
+
+	// 后续行是数据行
+	for i < len(lines) && isTableLine(lines[i]) && !isTableSeparator(lines[i]) {
+		row := splitTableRow(lines[i])
+		rows = append(rows, row)
+		i++
+	}
+
+	return i, &TableData{
+		Headers: headers,
+		Rows:    rows,
+	}
 }
 
 // splitLines 分割文本为行

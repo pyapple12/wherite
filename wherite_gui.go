@@ -658,10 +658,14 @@ func (ui *UI) renderMarkdownBlock(gtx layout.Context, block MarkdownBlock) layou
 		return ui.renderCodeBlock(gtx, block)
 	case BlockTypeList:
 		return ui.renderListItem(gtx, block.Content)
+	case BlockTypeTaskList:
+		return ui.renderTaskItem(gtx, block)
 	case BlockTypeQuote:
 		return ui.renderQuote(gtx, block.Content)
 	case BlockTypeHorizontalRule:
 		return ui.renderHorizontalRule(gtx)
+	case BlockTypeTable:
+		return ui.renderTable(gtx, block)
 	default:
 		return layout.Dimensions{}
 	}
@@ -896,6 +900,40 @@ func (ui *UI) renderListItem(gtx layout.Context, text string) layout.Dimensions 
 	)
 }
 
+// renderTaskItem 渲染任务列表项
+func (ui *UI) renderTaskItem(gtx layout.Context, block MarkdownBlock) layout.Dimensions {
+	if block.TaskData == nil {
+		return layout.Dimensions{}
+	}
+
+	taskData := block.TaskData
+	checkbox := "☐"
+	if taskData.Checked {
+		checkbox = "☑"
+	}
+
+	return layout.Flex{
+		Axis: layout.Horizontal,
+	}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			lbl := material.Label(ui.theme, unit.Sp(16), checkbox)
+			if taskData.Checked {
+				lbl.Color = color.NRGBA{R: 0, G: 150, B: 0, A: 255}
+			}
+			return lbl.Layout(gtx)
+		}),
+		layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			lbl := material.Label(ui.theme, unit.Sp(16), taskData.Content)
+			if taskData.Checked {
+				// 已完成的任务使用灰色删除线效果
+				lbl.Color = color.NRGBA{R: 150, G: 150, B: 150, A: 255}
+			}
+			return lbl.Layout(gtx)
+		}),
+	)
+}
+
 // renderQuote 渲染引用
 func (ui *UI) renderQuote(gtx layout.Context, text string) layout.Dimensions {
 	// 分割多行
@@ -959,21 +997,161 @@ func (ui *UI) renderQuote(gtx layout.Context, text string) layout.Dimensions {
 
 // renderHorizontalRule 渲染水平线
 func (ui *UI) renderHorizontalRule(gtx layout.Context) layout.Dimensions {
+	height := 2
 	return layout.UniformInset(unit.Dp(5)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return layout.Stack{}.Layout(gtx,
-			layout.Expanded(func(gtx layout.Context) layout.Dimensions {
-				stack := clip.Rect{
-					Min: image.Point{},
-					Max: image.Point{X: gtx.Constraints.Max.X, Y: gtx.Constraints.Max.Y},
-				}.Push(gtx.Ops)
-				defer stack.Pop()
-				paint.FillShape(gtx.Ops, ui.theme.Palette.ContrastBg, clip.Rect{
-					Min: image.Point{},
-					Max: image.Point{X: gtx.Constraints.Max.X, Y: gtx.Constraints.Max.Y},
-				}.Op())
-				return layout.Dimensions{Size: gtx.Constraints.Max}
-			}),
-		)
+		return layout.Inset{Top: unit.Dp(4), Bottom: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			// 使用可用的最大宽度
+			width := gtx.Constraints.Max.X
+			if width > 600 {
+				width = 600
+			}
+			paint.FillShape(gtx.Ops, color.NRGBA{R: 200, G: 200, B: 200, A: 255}, clip.Rect{
+				Min: image.Point{},
+				Max: image.Point{X: width, Y: height},
+			}.Op())
+			return layout.Dimensions{Size: image.Point{X: width, Y: height}}
+		})
+	})
+}
+
+// renderTable 渲染表格
+func (ui *UI) renderTable(gtx layout.Context, block MarkdownBlock) layout.Dimensions {
+	if block.TableData == nil || len(block.TableData.Headers) == 0 {
+		return layout.Dimensions{}
+	}
+
+	tableData := block.TableData
+	headers := tableData.Headers
+	rows := tableData.Rows
+
+	// 计算列数（取最大列数）
+	colCount := len(headers)
+	for _, row := range rows {
+		if len(row) > colCount {
+			colCount = len(row)
+		}
+	}
+
+	// 估算每列宽度
+	colWidth := gtx.Constraints.Max.X / colCount
+	if colWidth > 200 {
+		colWidth = 200
+	}
+
+	borderColor := color.NRGBA{R: 180, G: 180, B: 180, A: 255}
+	headerBgColor := color.NRGBA{R: 240, G: 240, B: 240, A: 255}
+	cellPadding := unit.Dp(6)
+	cellPaddingPx := int(gtx.Dp(cellPadding))
+	vertPadding := int(gtx.Dp(4))
+
+	// 渲染表头
+	var tableChildren []layout.FlexChild
+
+	// 表头行
+	tableChildren = append(tableChildren, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+		headerCells := make([]layout.FlexChild, len(headers))
+		for j, header := range headers {
+			headerCopy := header
+			isLastCol := j == len(headers)-1
+			headerCells[j] = layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				lbl := material.Label(ui.theme, unit.Sp(14), headerCopy)
+				lbl.Font.Weight = font.Bold
+				return ui.renderTableCell(gtx, lbl, headerBgColor, borderColor, cellPaddingPx, vertPadding, isLastCol)
+			})
+		}
+		return layout.Flex{Axis: layout.Horizontal}.Layout(gtx, headerCells...)
+	}))
+
+	// 数据行
+	for _, row := range rows {
+		rowCopy := row
+		tableChildren = append(tableChildren, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			rowCells := make([]layout.FlexChild, colCount)
+			for j := 0; j < colCount; j++ {
+				cellText := ""
+				if j < len(rowCopy) {
+					cellText = rowCopy[j]
+				}
+				cellCopy := cellText
+				isLastCol := j == colCount-1
+				rowCells[j] = layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					lbl := material.Label(ui.theme, unit.Sp(14), cellCopy)
+					return ui.renderTableCell(gtx, lbl, color.NRGBA{}, borderColor, cellPaddingPx, vertPadding, isLastCol)
+				})
+			}
+			return layout.Flex{Axis: layout.Horizontal}.Layout(gtx, rowCells...)
+		}))
+	}
+
+	return layout.UniformInset(unit.Dp(5)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, tableChildren...)
+	})
+}
+
+// renderTableCell 渲染单个表格单元格（带边框）
+func (ui *UI) renderTableCell(gtx layout.Context, lbl material.LabelStyle, bgColor color.NRGBA, borderColor color.NRGBA, paddingPx int, vertPadding int, isLastCol bool) layout.Dimensions {
+	return layout.Inset{Left: unit.Dp(float32(paddingPx)), Right: unit.Dp(float32(paddingPx)), Top: unit.Dp(float32(vertPadding)), Bottom: unit.Dp(float32(vertPadding))}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		// 获取文字尺寸
+		macro := op.Record(gtx.Ops)
+		dims := lbl.Layout(gtx)
+		macro.Stop()
+
+		// 绘制背景
+		if bgColor.A > 0 {
+			bgRect := clip.Rect{
+				Min: image.Point{X: -paddingPx + 1, Y: -vertPadding + 1},
+				Max: image.Point{X: dims.Size.X + paddingPx - 1, Y: dims.Size.Y + vertPadding - 1},
+			}
+			stack := bgRect.Push(gtx.Ops)
+			paint.FillShape(gtx.Ops, bgColor, bgRect.Op())
+			stack.Pop()
+		}
+
+		// 绘制边框（左边框、上边框、右边框、下边框）
+		borderWidth := 1
+		innerWidth := dims.Size.X + paddingPx*2 - 2
+		innerHeight := dims.Size.Y + vertPadding*2 - 2
+
+		// 上边框
+		if vertPadding > borderWidth {
+			topLine := clip.Rect{
+				Min: image.Point{X: -paddingPx + 1, Y: -vertPadding + 1},
+				Max: image.Point{X: -paddingPx + 1 + innerWidth, Y: -vertPadding + 1 + borderWidth},
+			}
+			stack := topLine.Push(gtx.Ops)
+			paint.FillShape(gtx.Ops, borderColor, topLine.Op())
+			stack.Pop()
+		}
+
+		// 左边框
+		leftLine := clip.Rect{
+			Min: image.Point{X: -paddingPx + 1, Y: -vertPadding + 1},
+			Max: image.Point{X: -paddingPx + 1 + borderWidth, Y: -vertPadding + 1 + innerHeight},
+		}
+		stack := leftLine.Push(gtx.Ops)
+		paint.FillShape(gtx.Ops, borderColor, leftLine.Op())
+		stack.Pop()
+
+		// 右边框
+		rightLine := clip.Rect{
+			Min: image.Point{X: -paddingPx + 1 + innerWidth - borderWidth, Y: -vertPadding + 1},
+			Max: image.Point{X: -paddingPx + 1 + innerWidth, Y: -vertPadding + 1 + innerHeight},
+		}
+		stack = rightLine.Push(gtx.Ops)
+		paint.FillShape(gtx.Ops, borderColor, rightLine.Op())
+		stack.Pop()
+
+		// 下边框
+		bottomLine := clip.Rect{
+			Min: image.Point{X: -paddingPx + 1, Y: -vertPadding + 1 + innerHeight - borderWidth},
+			Max: image.Point{X: -paddingPx + 1 + innerWidth, Y: -vertPadding + 1 + innerHeight},
+		}
+		stack = bottomLine.Push(gtx.Ops)
+		paint.FillShape(gtx.Ops, borderColor, bottomLine.Op())
+		stack.Pop()
+
+		// 渲染文字
+		return lbl.Layout(gtx)
 	})
 }
 
