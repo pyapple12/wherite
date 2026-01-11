@@ -53,6 +53,7 @@ type UI struct {
 	hasUnsavedChanges bool   // 是否有未保存的更改
 	originalTitle     string // 文章原始标题（用于比较）
 	originalContent   string // 文章原始内容（用于比较）
+	timeInfo          string // 时间信息（创建时间和修改时间）
 }
 
 // NewUI 创建一个新的UI实例
@@ -224,7 +225,7 @@ func (ui *UI) saveArticle() {
 
 		// 重新获取文章数据以显示正确的时间信息
 		if article, err := GetArticleByID(ui.db, int(id)); err == nil {
-			ui.successMsg = fmt.Sprintf("创建成功！ | 创建时间: %s | 修改时间: %s", article.CreatedAt, article.UpdatedAt)
+			ui.timeInfo = fmt.Sprintf("创建时间: %s | 修改时间: %s", article.CreatedAt, article.UpdatedAt)
 		}
 	} else {
 		idStr := ui.idInput.Text()
@@ -254,7 +255,7 @@ func (ui *UI) saveArticle() {
 
 		// 重新获取文章数据以显示正确的时间信息
 		if article, err := GetArticleByID(ui.db, id); err == nil {
-			ui.successMsg = fmt.Sprintf("保存成功！ | 创建时间: %s | 修改时间: %s", article.CreatedAt, article.UpdatedAt)
+			ui.timeInfo = fmt.Sprintf("创建时间: %s | 修改时间: %s", article.CreatedAt, article.UpdatedAt)
 		}
 	}
 }
@@ -286,7 +287,8 @@ func (ui *UI) selectArticle(id int) {
 	ui.idInput.SetText(strconv.Itoa(id))
 	ui.isCreating = false
 	ui.errorMsg = ""
-	ui.successMsg = fmt.Sprintf("创建时间: %s | 修改时间: %s", article.CreatedAt, article.UpdatedAt)
+	ui.timeInfo = fmt.Sprintf("创建时间: %s | 修改时间: %s", article.CreatedAt, article.UpdatedAt)
+	ui.successMsg = "" // 清空成功消息
 }
 
 // deleteArticle 删除当前选中的文章
@@ -654,37 +656,52 @@ func (ui *UI) toolbarLayoutContent(gtx layout.Context) layout.Dimensions {
 
 // messageLayoutContent 渲染消息内容
 func (ui *UI) messageLayoutContent(gtx layout.Context) layout.Dimensions {
-	if ui.errorMsg == "" && ui.successMsg == "" && !ui.hasUnsavedChanges {
+	// 检查是否有内容需要显示
+	hasTimeInfo := ui.timeInfo != ""
+	hasMessages := ui.errorMsg != "" || ui.successMsg != "" || ui.hasUnsavedChanges
+
+	if !hasTimeInfo && !hasMessages {
 		return layout.Dimensions{}
+	}
+
+	var children []layout.FlexChild
+
+	// 渲染时间信息（创建时间和修改时间）- 在上面
+	if hasTimeInfo {
+		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			lbl := material.Label(ui.theme, unit.Sp(14), ui.timeInfo)
+			return lbl.Layout(gtx)
+		}))
+	}
+
+	// 渲染其他消息（错误、保存成功、未保存提示）
+	if ui.errorMsg != "" {
+		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			lbl := material.Label(ui.theme, unit.Sp(14), ui.errorMsg)
+			lbl.Color = ui.theme.ContrastBg
+			return lbl.Layout(gtx)
+		}))
+	}
+
+	if ui.successMsg != "" {
+		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			lbl := material.Label(ui.theme, unit.Sp(14), ui.successMsg)
+			return lbl.Layout(gtx)
+		}))
+	}
+
+	// 未保存提示总是显示在最后，并且是固定存在的
+	if ui.hasUnsavedChanges {
+		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			lbl := material.Label(ui.theme, unit.Sp(14), "未保存……")
+			lbl.Color = color.NRGBA{R: 255, G: 165, B: 0, A: 255} // 橙色提示
+			return lbl.Layout(gtx)
+		}))
 	}
 
 	return layout.Flex{
 		Axis: layout.Vertical,
-	}.Layout(gtx,
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			if ui.errorMsg != "" {
-				lbl := material.Label(ui.theme, unit.Sp(14), ui.errorMsg)
-				lbl.Color = ui.theme.ContrastBg
-				return lbl.Layout(gtx)
-			}
-			return layout.Dimensions{}
-		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			if ui.successMsg != "" {
-				lbl := material.Label(ui.theme, unit.Sp(14), ui.successMsg)
-				return lbl.Layout(gtx)
-			}
-			return layout.Dimensions{}
-		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			if ui.hasUnsavedChanges {
-				lbl := material.Label(ui.theme, unit.Sp(14), "未保存……")
-				lbl.Color = color.NRGBA{R: 255, G: 165, B: 0, A: 255} // 橙色提示
-				return lbl.Layout(gtx)
-			}
-			return layout.Dimensions{}
-		}),
-	)
+	}.Layout(gtx, children...)
 }
 
 // titleEditorLayoutContent 渲染标题编辑器内容
