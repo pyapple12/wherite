@@ -136,14 +136,14 @@ type MarkdownBlock struct {
 	Content   string
 	Level     int
 	Inlines   []InlineElement
-	TableData *TableData     // 对于表格类型
-	TaskData  *TaskListData  // 对于任务列表类型
+	TableData *TableData    // 对于表格类型
+	TaskData  *TaskListData // 对于任务列表类型
 }
 
 // TaskListData 表示任务列表数据
 type TaskListData struct {
-	Checked   bool   // 是否已完成
-	Content   string // 任务内容
+	Checked bool   // 是否已完成
+	Content string // 任务内容
 }
 
 // TableData 表示表格数据
@@ -220,7 +220,7 @@ func parseLine(line string) MarkdownBlock {
 		return MarkdownBlock{
 			Type: BlockTypeTaskList,
 			TaskData: &TaskListData{
-				Checked:  checked,
+				Checked: checked,
 				Content: content,
 			},
 		}
@@ -730,7 +730,7 @@ func parseInlineLink(text string, start int) (int, *InlineElement) {
 	var linkText, linkURL string
 	if isImage {
 		// 图片格式 ![alt](url)
-		linkText = text[searchStart : closeBracket]
+		linkText = text[searchStart:closeBracket]
 		linkURL = text[closeBracket+2 : closeParen]
 	} else {
 		// 普通链接格式 [text](url)
