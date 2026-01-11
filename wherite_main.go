@@ -2,6 +2,8 @@ package main
 
 import (
 	"log"
+	"os"
+	"runtime"
 
 	"gioui.org/app"
 	"gioui.org/unit"
@@ -13,7 +15,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("无法连接数据库: %v", err)
 	}
-	defer CloseDB(db)
 
 	// 初始化数据库表（如果不存在）
 	err = InitializeDatabase(db)
@@ -34,11 +35,15 @@ func main() {
 
 		ui := NewUI(db)
 
-		if err := ui.Run(w); err != nil {
+		if err := ui.Run(w, db); err != nil {
 			log.Fatal(err)
 		}
+		// 窗口关闭后强制退出程序
+		runtime.Goexit()
 	}()
 
 	// 运行主事件循环
 	app.Main()
+	// 确保主程序退出
+	os.Exit(0)
 }

@@ -7,6 +7,7 @@ import (
 	"image/color"
 	"strconv"
 	"strings"
+	"time"
 
 	"gioui.org/app"
 	"gioui.org/font"
@@ -32,6 +33,7 @@ type UI struct {
 	db                *sql.DB
 	errorMsg          string
 	successMsg        string
+	successMsgTime    time.Time
 	isCreating        bool
 	articles          []Article
 	selectedArticleID int
@@ -60,20 +62,25 @@ func NewUI(db *sql.DB) *UI {
 	}
 	ui.idInput.SingleLine = true
 	ui.idInput.Submit = true
-	ui.titleInput.SingleLine = true
+	ui.titleInput.SingleLine = false
+	ui.titleInput.Submit = true
 	ui.searchInput.SingleLine = true
 	ui.loadArticles()
 	return ui
 }
 
 // Run 运行图形界面事件循环
-func (ui *UI) Run(w *app.Window) error {
+func (ui *UI) Run(w *app.Window, db *sql.DB) error {
 	var ops op.Ops
 
 	for {
 		e := w.Event()
 		switch e := e.(type) {
 		case app.DestroyEvent:
+			// 窗口销毁时关闭数据库连接
+			if db != nil {
+				db.Close()
+			}
 			return e.Err
 		case app.FrameEvent:
 			gtx := app.NewContext(&ops, e)
@@ -87,6 +94,12 @@ func (ui *UI) Run(w *app.Window) error {
 
 // Layout 渲染图形界面布局
 func (ui *UI) Layout(gtx layout.Context, w *app.Window) {
+	// 自动隐藏成功消息（1秒后）
+	if !ui.successMsgTime.IsZero() && time.Since(ui.successMsgTime) >= time.Second {
+		ui.successMsg = ""
+		ui.successMsgTime = time.Time{}
+	}
+
 	if ui.toggleSidebarBtn.Clicked(gtx) {
 		ui.sidebarCollapsed = !ui.sidebarCollapsed
 	}
@@ -197,6 +210,7 @@ func (ui *UI) saveArticle() {
 		ui.isCreating = false
 		ui.errorMsg = ""
 		ui.successMsg = "创建成功！"
+		ui.successMsgTime = time.Now()
 		ui.loadArticles()
 	} else {
 		idStr := ui.idInput.Text()
@@ -218,6 +232,7 @@ func (ui *UI) saveArticle() {
 		}
 		ui.errorMsg = ""
 		ui.successMsg = "保存成功！"
+		ui.successMsgTime = time.Now()
 		ui.loadArticles()
 	}
 }
@@ -318,9 +333,12 @@ func (ui *UI) clearSearch() {
 // sidebarLayout 渲染侧边栏布局
 func (ui *UI) sidebarLayout() layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
-		gtx.Constraints.Max.X = 350 // 设置侧边栏宽度
+		// 设置侧边栏固定宽度为400
+		gtx.Constraints.Min.X = 400
+		gtx.Constraints.Max.X = 400
 		if ui.sidebarCollapsed {
 			// 折叠状态：显示一个小按钮切换回展开状态
+			gtx.Constraints.Min.X = 60
 			gtx.Constraints.Max.X = 60
 			return layout.UniformInset(unit.Dp(5)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				btn := material.Button(ui.theme, &ui.toggleSidebarBtn, "☰")
@@ -448,6 +466,8 @@ func (ui *UI) articleItemLayout(gtx layout.Context, article Article) layout.Dime
 						lbl.Color = ui.theme.Palette.ContrastFg
 					}
 					lbl.Font.Weight = font.Medium
+					// 标题最多3行，每行约16个中文字符宽度
+					lbl.MaxLines = 3
 					return lbl.Layout(gtx)
 				}),
 				layout.Rigid(layout.Spacer{Height: unit.Dp(2)}.Layout),
@@ -467,6 +487,11 @@ func (ui *UI) articleItemLayout(gtx layout.Context, article Article) layout.Dime
 func (ui *UI) editorLayout() layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
 		return layout.UniformInset(unit.Dp(20)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			// 如果没有选择文章且不在创建模式，显示欢迎页面覆盖整个编辑器区域
+			if ui.selectedArticleID == -1 && !ui.isCreating {
+				return ui.editorWelcomeLayout(gtx)
+			}
+
 			return layout.Flex{
 				Axis: layout.Vertical,
 			}.Layout(gtx,
@@ -490,14 +515,87 @@ func (ui *UI) editorLayout() layout.Widget {
 	}
 }
 
+// editorWelcomeLayout 渲染编辑器欢迎页面（覆盖整个编辑器区域）
+func (ui *UI) editorWelcomeLayout(gtx layout.Context) layout.Dimensions {
+	// 绘制背景色
+	stack := clip.Rect{
+		Min: image.Point{},
+		Max: gtx.Constraints.Max,
+	}.Push(gtx.Ops)
+	paint.FillShape(gtx.Ops, color.NRGBA{R: 250, G: 250, B: 250, A: 255}, clip.Rect{
+		Min: image.Point{},
+		Max: gtx.Constraints.Max,
+	}.Op())
+	stack.Pop()
+
+	// 测量内容高度
+	content := func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				lbl := material.Label(ui.theme, unit.Sp(24), "欢迎使用 Wherite")
+				lbl.Font.Weight = font.Bold
+				return lbl.Layout(gtx)
+			}),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				lbl := material.Label(ui.theme, unit.Sp(14), "选择一个文章开始编辑，或创建新文章")
+				lbl.Color = color.NRGBA{R: 136, G: 136, B: 136, A: 255}
+				return lbl.Layout(gtx)
+			}),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(32)}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				btn := material.Button(ui.theme, &ui.newArticleBtn, "新建文章")
+				btn.TextSize = unit.Sp(16)
+				return btn.Layout(gtx)
+			}),
+		)
+	}
+
+	// 测量内容尺寸
+	macro := op.Record(gtx.Ops)
+	contentDims := content(gtx)
+	macro.Stop()
+
+	// 计算垂直居中的间距
+	availHeight := gtx.Constraints.Max.Y
+	topSpacing := (availHeight - contentDims.Size.Y) / 2
+	if topSpacing < 0 {
+		topSpacing = 0
+	}
+
+	// 使用 Stack 实现居中
+	return layout.Stack{Alignment: layout.Center}.Layout(gtx,
+		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+			return layout.Dimensions{Size: gtx.Constraints.Max}
+		}),
+		layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+			// 垂直方向：顶部间距
+			gtx.Constraints.Min.Y = topSpacing
+			layout.Spacer{Height: unit.Dp(float32(topSpacing))}.Layout(gtx)
+
+			// 水平方向居中 + 内容
+			return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+				layout.Flexed(1, layout.Spacer{}.Layout),
+				layout.Rigid(content),
+				layout.Flexed(1, layout.Spacer{}.Layout),
+			)
+		}),
+	)
+}
+
 // toolbarLayoutContent 渲染工具栏内容
 func (ui *UI) toolbarLayoutContent(gtx layout.Context) layout.Dimensions {
+	title := "编辑器"
+	if ui.previewMode {
+		title = "编辑器 -- 预览模式"
+	}
+
 	return layout.Flex{
 		Axis:      layout.Horizontal,
 		Alignment: layout.Middle,
 	}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			lbl := material.Label(ui.theme, unit.Sp(18), "编辑器")
+			lbl := material.Label(ui.theme, unit.Sp(18), title)
 			lbl.Font.Weight = font.Bold
 			return lbl.Layout(gtx)
 		}),
@@ -562,8 +660,25 @@ func (ui *UI) titleEditorLayoutContent(gtx layout.Context) layout.Dimensions {
 		Axis: layout.Vertical,
 	}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			// 标签背景色 - 使用更明显的灰色
+			bgColor := color.NRGBA{R: 220, G: 220, B: 220, A: 255}
+			height := gtx.Dp(30)
+			width := gtx.Constraints.Max.X
+
+			// 直接绘制背景
+			stack := clip.Rect{
+				Min: image.Point{},
+				Max: image.Point{X: width, Y: height},
+			}.Push(gtx.Ops)
+			paint.FillShape(gtx.Ops, bgColor, clip.Rect{
+				Min: image.Point{},
+				Max: image.Point{X: width, Y: height},
+			}.Op())
+			stack.Pop()
+
 			lbl := material.Label(ui.theme, unit.Sp(16), "标题")
-			return lbl.Layout(gtx)
+			lbl.Color = color.NRGBA{R: 60, G: 60, B: 60, A: 255}
+			return layout.UniformInset(unit.Dp(5)).Layout(gtx, lbl.Layout)
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(5)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -581,8 +696,25 @@ func (ui *UI) contentEditorLayoutContent(gtx layout.Context) layout.Dimensions {
 		Axis: layout.Vertical,
 	}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			// 标签背景色 - 使用更明显的灰色
+			bgColor := color.NRGBA{R: 220, G: 220, B: 220, A: 255}
+			height := gtx.Dp(30)
+			width := gtx.Constraints.Max.X
+
+			// 直接绘制背景
+			stack := clip.Rect{
+				Min: image.Point{},
+				Max: image.Point{X: width, Y: height},
+			}.Push(gtx.Ops)
+			paint.FillShape(gtx.Ops, bgColor, clip.Rect{
+				Min: image.Point{},
+				Max: image.Point{X: width, Y: height},
+			}.Op())
+			stack.Pop()
+
 			lbl := material.Label(ui.theme, unit.Sp(16), "内容")
-			return lbl.Layout(gtx)
+			lbl.Color = color.NRGBA{R: 60, G: 60, B: 60, A: 255}
+			return layout.UniformInset(unit.Dp(5)).Layout(gtx, lbl.Layout)
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(5)}.Layout),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
@@ -849,7 +981,7 @@ func (ui *UI) renderCodeBlock(gtx layout.Context, block MarkdownBlock) layout.Di
 
 	// 渲染背景
 	bgColor := color.NRGBA{R: 245, G: 245, B: 245, A: 255} // 浅灰色背景
-	codePadding := unit.Dp(8)                               // 代码内容内边距
+	codePadding := unit.Dp(8)                              // 代码内容内边距
 
 	return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		// 先渲染代码内容（带内边距）获取尺寸
@@ -1072,7 +1204,7 @@ func (ui *UI) renderTable(gtx layout.Context, block MarkdownBlock) layout.Dimens
 					cellText = rowCopy[j]
 				}
 				cellCopy := cellText
-					rowCells[j] = layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				rowCells[j] = layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					lbl := material.Label(ui.theme, unit.Sp(14), cellCopy)
 					return ui.renderTableCell(gtx, lbl, color.NRGBA{}, borderColor, cellPaddingPx, vertPadding)
 				})
@@ -1152,4 +1284,3 @@ func (ui *UI) renderTableCell(gtx layout.Context, lbl material.LabelStyle, bgCol
 		return lbl.Layout(gtx)
 	})
 }
-
